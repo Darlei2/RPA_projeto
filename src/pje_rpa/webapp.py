@@ -28,6 +28,7 @@ from .config import (
 from .flow import PJeRegistrationFlow
 from .models import LawyerRecord, digits
 from .signer import PJeOfficeSigner
+from .totp import gerar_totp, normalizar_chave
 
 
 class _Session:
@@ -131,13 +132,14 @@ class RegistrationServer:
                     pfx = _decode_pfx(payload["pfx_base64"])
                     password = payload["password"]
                     record = _record_from_payload(payload["cadastro"])
+                    totp_secret = normalizar_chave(payload.get("totp_secret", ""))
                 except (KeyError, ValueError) as exc:
                     self._send(400, "application/json",
                                json.dumps({"error": f"entrada invalida: {exc}"}).encode("utf-8"))
                     return
                 server.session = _Session()
                 server.session.running = True
-                threading.Thread(target=server._execute, args=(pfx, password, record), daemon=True).start()
+                threading.Thread(target=server._execute, args=(pfx, password, record, totp_secret), daemon=True).start()
                 self._send(200, "application/json", b'{"ok":true}')
 
         self._httpd = ThreadingHTTPServer((host, port), Handler)
@@ -185,7 +187,7 @@ class RegistrationServer:
         self._set_pending(remaining)
 
     # ------------------------------------------------------------------ execucao
-    def _execute(self, pfx: bytes, password: str, record: LawyerRecord) -> None:
+    def _execute(self, pfx: bytes, password: str, record: LawyerRecord, totp_secret: str = "") -> None:
         session = self.session
         store = WindowsCertificateStore()
         thumbprint = None
@@ -221,7 +223,7 @@ class RegistrationServer:
             browser = PlaywrightBrowser(self.config)
             flow = PJeRegistrationFlow(
                 self.config, record, info, password, browser, signer, audit,
-                code_provider=lambda msg: self._ask_code(session, msg),
+                code_provider=lambda msg: self._provide_code(session, msg, totp_secret),
                 rehearsal=self.rehearsal,
             )
             result = flow.run()
@@ -236,6 +238,7 @@ class RegistrationServer:
             session.emit("error", reason=f"Falha inesperada: {type(exc).__name__}")
         finally:
             password = ""
+            totp_secret = ""  # melhor esforco: strings Python nao garantem limpeza da RAM
             if browser is not None:
                 try:
                     browser.close()
@@ -249,6 +252,17 @@ class RegistrationServer:
                 except Exception:
                     session.emit("step", text="ATENCAO: remova o certificado manualmente do repositorio do Windows")
             session.running = False
+
+    def _provide_code(self, session: _Session, message: str, totp_secret: str) -> "str | None":
+        if not totp_secret:
+            return self._ask_code(session, message)
+        # Evita gerar codigo prestes a expirar. O horario do Windows deve estar sincronizado.
+        import time
+        segundos_restantes = 30 - (time.time() % 30)
+        if segundos_restantes < 8:
+            time.sleep(segundos_restantes + 0.3)
+        session.emit("step", text="Codigo de autenticacao TOTP gerado localmente")
+        return gerar_totp(totp_secret)
 
     def _ask_code(self, session: _Session, message: str) -> "str | None":
         session.emit("code_request", text=message)
@@ -314,6 +328,10 @@ _PAGE = """<!doctype html>
       <input type="file" id="pfx" accept=".pfx,.p12" class="hidden"></div>
     <label>Senha do certificado</label>
     <input type="password" id="password" autocomplete="off">
+    <label>Chave secreta 2FA / TOTP (opcional)</label>
+    <input type="password" id="totp_secret" autocomplete="off" spellcheck="false"
+      placeholder="Base32: normalmente 32 caracteres (A-Z e 2-7)">
+    <p class="note">Usada apenas nesta execucao para gerar o codigo quando o PJe solicitar. Deixe vazio para informar o 2FA manualmente. Nao cole QR Code ou dados aqui no chat.</p>
     <div class="row">
       <div><label>Nome do titular</label><input id="nome"></div>
       <div><label>CPF</label><input id="cpf" inputmode="numeric"></div>
@@ -353,6 +371,7 @@ _PAGE = """<!doctype html>
       <button id="sendcode">Enviar codigo</button>
     </div>
     <div id="verdict" class="hidden"></div>
+    <button id="retry" class="hidden" type="button">Corrigir dados e tentar novamente</button>
   </div>
 <script>
 const $=id=>document.getElementById(id);
@@ -393,10 +412,16 @@ $("go").onclick=async()=>{
     else if(m.kind==="done"){const ok=["COMPLETED","ALREADY_REGISTERED","REHEARSAL_OK"].includes(m.status);
       show(ok,m.status+" — "+m.reason);es.close();}
     else if(m.kind==="error"){show(false,m.reason);es.close();}};
-  await fetch("/start",{method:"POST",body:JSON.stringify({pfx_base64:pfxB64,password:$("password").value,cadastro})});
+  await fetch("/start",{method:"POST",body:JSON.stringify({pfx_base64:pfxB64,password:$("password").value,totp_secret:$("totp_secret").value,cadastro})});
 };
 $("sendcode").onclick=async()=>{await fetch("/code",{method:"POST",body:JSON.stringify({code:$("code").value})});
   $("codebox").classList.add("hidden");};
 function show(ok,text){const v=$("verdict");v.textContent=text;v.className="verdict "+(ok?"ok":"err");
-  v.classList.remove("hidden");}
+  v.classList.remove("hidden");$("retry").classList.remove("hidden");}
+$("retry").onclick=()=>{
+   $("form").classList.remove("hidden");$("progress").classList.add("hidden");
+   $("steps").replaceChildren();$("codebox").classList.add("hidden");
+   $("verdict").classList.add("hidden");$("retry").classList.add("hidden");
+   check();
+ };
 </script></main></body></html>"""
