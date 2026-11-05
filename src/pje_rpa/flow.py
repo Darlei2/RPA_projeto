@@ -79,6 +79,8 @@ class PJeRegistrationFlow:
 
         self.browser.click("login_certificate_button")
         self._transition(FlowState.WAITING_CERTIFICATE, "certificate_requested")
+        if hasattr(self.signer, '_login_complete'):
+            self.signer._login_complete = lambda: (self.browser.visible('second_factor', 200) or self.browser.visible('lawyer_panel', 200) or self.browser.visible('registration_form', 200))
         self.signer.authenticate(self.certificate, self._password)
         self.audit.record("signer_authenticated", self.state.value)
 
@@ -117,10 +119,41 @@ class PJeRegistrationFlow:
         if not self.browser.visible("registration_form", 10000):
             return self._failed("Formulario de cadastro nao localizado apos autenticacao")
         self._transition(FlowState.REGISTRATION_FORM, "registration_form_detected")
-        if mismatch := self._identity_mismatch():
-            return self._blocked(mismatch)
+        if hasattr(self.browser, "page"):
+            from .adaptive_form import operate
 
-        self._fill_form()
+            report = operate(
+                self.browser.page,
+                self.record,
+            )
+
+            self.audit.record(
+                "adaptive_form_evaluated",
+                self.state.value,
+                report,
+            )
+
+            if report["blocked"]:
+                return self._blocked(
+                    "Divergencia encontrada: "
+                    + ", ".join(report["blocked"])
+                )
+
+            if report["pending"]:
+                self._transition(
+                    FlowState.REVIEW,
+                    "adaptive_review_pending",
+                    report,
+                )
+                return self._needs_human(
+                    "Revisao necessaria: "
+                    + ", ".join(report["pending"])
+                )
+        else:
+            if mismatch := self._identity_mismatch():
+                return self._blocked(mismatch)
+
+            self._fill_form()
         self._transition(FlowState.REVIEW, "form_filled", self.record.safe_summary())
 
         if self.rehearsal:

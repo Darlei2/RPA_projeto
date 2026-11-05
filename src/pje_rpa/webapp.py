@@ -235,6 +235,8 @@ class RegistrationServer:
         except (CertificateError, ConfigurationError) as exc:
             session.emit("error", reason=str(exc))
         except Exception as exc:  # noqa: BLE001 - a pagina mostra o tipo, o log tem o resto
+            import traceback
+            traceback.print_exc()
             session.emit("error", reason=f"Falha inesperada: {type(exc).__name__}")
         finally:
             password = ""

@@ -85,6 +85,7 @@ class PJeOfficeSigner(SignerPort):
         _import_jab_quietly()
         self.config = config
         self._jab = _start_jab()
+        self._login_complete = None
 
     def authenticate(self, certificate: "CertificateInfo", password: str) -> None:
         self._handle_dialogs(certificate, purpose="autenticacao")
@@ -100,10 +101,15 @@ class PJeOfficeSigner(SignerPort):
             if window is None:
                 if handled:
                     return  # janela tratada e fechada pelo PJeOffice
+                if purpose == 'autenticacao' and self._login_complete and self._login_complete():
+                    return
                 time.sleep(0.5)
                 continue
-            self._select_and_confirm(window, certificate, purpose)
-            handled += 1
+            if (window.title or '').strip().casefold() == 'autorização de site':
+                self._authorize_official_site(window)
+            else:
+                self._select_and_confirm(window, certificate, purpose)
+                handled += 1
             # Espera a janela fechar antes de procurar uma eventual nova (ex.: outra etapa).
             close_deadline = time.monotonic() + 10
             while time.monotonic() < close_deadline and ctypes.windll.user32.IsWindowVisible(window.hwnd):
@@ -117,6 +123,8 @@ class PJeOfficeSigner(SignerPort):
 
     def _find_window(self):
         for window in self._jab.get_windows():
+            if (window.title or '').strip().casefold() == 'autorização de site' and ctypes.windll.user32.IsWindowVisible(window.hwnd):
+                return window
             if ctypes.windll.user32.IsWindowVisible(window.hwnd) and re.search(
                 self.config.window_title_regex, window.title or ""
             ):
@@ -130,6 +138,17 @@ class PJeOfficeSigner(SignerPort):
         self._jab.set_hwnd(window.hwnd)
         self._jab.set_context(vm_id, context)
         return list(ContextTree(self._jab, max_depth=30))
+
+    def _authorize_official_site(self, window):
+        nodes = self._tree(window)
+        labels = {(n.context_info.name or '').strip() for n in nodes if n.context_info.role == 'label'}
+        required = {'A aplicação \'PJe\' deseja acessar o PJeOffice.', 'Endereço: https://sso.cloud.pje.jus.br/auth/realms/pje', 'Deseja autorizar?'}
+        if not required.issubset(labels):
+            raise SignerError('Endereco de autorizacao nao corresponde ao SSO oficial do PJe')
+        button = _find(nodes, 'push button', 'Sim desta vez')
+        if button is None or not _has_state(self._jab, button, 'enabled', 'ativado'):
+            raise SignerError('Botao de autorizacao temporaria nao disponivel')
+        _press(button)
 
     def _select_and_confirm(self, window, certificate: "CertificateInfo", purpose: str) -> None:
         nodes = self._tree(window)

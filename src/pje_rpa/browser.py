@@ -18,6 +18,7 @@ _OUTLINE_JS = """() => {
     title: document.title,
     headings: pick('h1,h2,h3,h4,legend,.titulo,.title'),
     labels: pick('label'),
+    identity_nodes: [...document.querySelectorAll('td,th,span,div,strong,b')].filter(seen).filter(el => { const v=(el.innerText||'').trim(); return v.length>0 && v.length<120 && /nome|cpf|oab/i.test(v) && ![...el.children].some(c=>/nome|cpf|oab/i.test(c.innerText||'')); }).slice(0,30).map(el=>({topic:((el.innerText||'').match(/nome|cpf|oab/i)||[''])[0].toLowerCase(),tag:el.tagName.toLowerCase(),id:el.id||'',parent_tag:el.parentElement?.tagName.toLowerCase()||'',parent_id:el.parentElement?.id||'',siblings:[...(el.parentElement?.children||[])].slice(0,6).map(x=>({tag:x.tagName.toLowerCase(),id:x.id||''}))})),
     buttons: pick('button,input[type=submit],input[type=button],a[role=button],[role=button]'),
     inputs: [...document.querySelectorAll('input,select,textarea')].filter(seen).slice(0, 40)
       .map(el => ({tag: el.tagName.toLowerCase(), type: el.type || '', name: el.name || '', id: el.id || ''})),
@@ -122,7 +123,13 @@ class PlaywrightBrowser(BrowserPort):
         locator.fill(value)
 
     def read(self, group: str) -> str:
-        locator = self._first_visible(group)
+        try:
+            locator = self._first_visible(group)
+        except BrowserError:
+            if group not in ('detected_name', 'detected_cpf', 'detected_oab'): raise
+            value = self.page.evaluate('(g)=>{const p={detected_name:/^nome(?: completo)?\\s*:?\\s*$/i,detected_cpf:/^cpf\\s*:?\\s*$/i,detected_oab:/^(?:n\\W*)?oab\\b.*$/i}[g];if(!p)return null;for(const el of document.querySelectorAll(`span,label,th,td,dt`)){if(!el.getClientRects().length)continue;const t=(el.innerText||``).trim();if(t.length>35||!p.test(t))continue;const td=el.closest(`td`),par=el.parentElement;const cand=[el.nextElementSibling,...(par?[...par.children].slice([...par.children].indexOf(el)+1):[]),td?.nextElementSibling,td?.nextElementSibling?.querySelector(`b,strong,span`),par?.nextElementSibling];for(const c of cand){const v=(c?.value||c?.innerText||``).trim();if(!v||v.length>120)continue;if(g===`detected_cpf`){if(v.replace(/\\D/g,``).length===11)return v;}else if(g===`detected_oab`){if(/\\d/.test(v)&&/[A-Za-z]{2}/.test(v))return v;}else if(v.split(/\\s+/).length>=2&&/[A-Za-z]/.test(v)&&!/\\b(?:cpf|oab)\\b/i.test(v))return v;}}return null}', group)
+            if value: return str(value).strip()
+            raise BrowserError(group)
         try:
             value = locator.input_value()
             if value:
