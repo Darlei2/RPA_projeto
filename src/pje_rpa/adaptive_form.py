@@ -1,7 +1,8 @@
 """Motor adaptativo para formularios PJe.
 
 Inspeciona controles, valida identidade e preenche os campos reconhecidos.
-Nao envia formularios, nao confirma termos e nao assina documentos.
+`operate` nao envia formularios. `locate_action`/`click_action` localizam o botao de
+avancar/assinar de cada PJe pelo texto; quem decide clicar e o fluxo (nunca no ensaio).
 """
 
 from __future__ import annotations
@@ -155,7 +156,7 @@ JS_SNAPSHOT = r"""() => {
   const location = [];
 
   const isLocationLabel = value =>
-    /^(?:munic[i?]pio|cidade)\s*\/\s*uf\s*:?\s*$/i
+    /^(?:munic[i\u00ed]pio|cidade)\s*\/\s*uf\s*:?\s*$/i
       .test(value.trim());
 
   for (const el of document.querySelectorAll(
@@ -919,3 +920,138 @@ def operate(
         )
 
     return report
+
+
+# ---------------------------------------------------------------- botoes de acao
+JS_ACTIONS = r"""() => {
+  const visible = e => !!(e.getClientRects().length) &&
+    getComputedStyle(e).visibility !== 'hidden';
+  const txt = e => (e.innerText || e.value || e.getAttribute('aria-label') ||
+    e.getAttribute('title') || '').trim().replace(/\s+/g, ' ');
+  const nodes = [...document.querySelectorAll(
+    'button,input[type=submit],input[type=button],a,[role=button]'
+  )];
+  return nodes.map((e, index) => {
+    if (!visible(e) || e.disabled || e.getAttribute('aria-disabled') === 'true') return null;
+    const text = txt(e);
+    if (!text || text.length > 60) return null;
+    const form = e.closest('form');
+    return {
+      index,
+      text,
+      submit: (e.type || '').toLowerCase() === 'submit',
+      in_form: !!(form && form.querySelector('input:not([type=hidden]),select,textarea')),
+    };
+  }).filter(Boolean);
+}"""
+
+JS_MARK_ACTION = r"""([index, mark]) => {
+  document.querySelectorAll('[data-pje-rpa-action]')
+    .forEach(e => e.removeAttribute('data-pje-rpa-action'));
+  const nodes = [...document.querySelectorAll(
+    'button,input[type=submit],input[type=button],a,[role=button]'
+  )];
+  const el = nodes[index];
+  if (!el) return false;
+  el.setAttribute('data-pje-rpa-action', mark);
+  return true;
+}"""
+
+JS_MESSAGES = r"""() => {
+  const visible = e => !!(e.getClientRects().length) &&
+    getComputedStyle(e).visibility !== 'hidden';
+  const sel = '.rich-messages,.rich-message,.ui-messages-error,.ui-message-error,' +
+    '.alert-danger,.alert-error,.erro,.error,.errors,.mensagem-erro,[role=alert],' +
+    '.mat-error,.invalid-feedback';
+  const out = [];
+  for (const el of document.querySelectorAll(sel)) {
+    if (!visible(el)) continue;
+    const t = (el.innerText || '').trim().replace(/\s+/g, ' ');
+    if (t && t.length <= 200) out.push(t);
+  }
+  return [...new Set(out)].slice(0, 10);
+}"""
+
+ACTION_RULES = {
+    # padrao forte (texto completo conhecido), padrao aceito
+    "advance": (
+        r"confirmar dados e prosseguir|salvar e prosseguir|salvar e continuar",
+        r"\b(prosseguir|continuar|confirmar|avancar|proximo|proxima|seguinte|"
+        r"salvar|gravar|concluir|finalizar|enviar|cadastrar)\b",
+    ),
+    "sign": (
+        r"assinar termo( de compromisso)?|assinar e (enviar|concluir|prosseguir)",
+        r"\bassinar\b",
+    ),
+}
+
+ACTION_NEGATIVE = (
+    r"\b(cancelar|voltar|sair|limpar|excluir|remover|desistir|fechar|imprimir|"
+    r"pesquisar|buscar|consultar|anterior|logout|ajuda|incluir|adicionar|novo|nova|"
+    r"alterar|editar|baixar|download|visualizar|nao)\b"
+)
+
+
+def rank_actions(
+    candidates: list[dict[str, Any]],
+    purpose: str,
+) -> list[tuple[int, dict[str, Any]]]:
+    strong, accepted = ACTION_RULES[purpose]
+    ranked = []
+    for item in candidates:
+        text = norm(item.get("text", ""))
+        if not text or re.search(ACTION_NEGATIVE, text):
+            continue
+        if re.search(strong, text):
+            score = 100
+        elif re.search(accepted, text):
+            score = 50
+        else:
+            continue
+        if item.get("submit"):
+            score += 10
+        if item.get("in_form"):
+            score += 5
+        ranked.append((score, item))
+    ranked.sort(key=lambda pair: -pair[0])
+    return ranked
+
+
+def choose_action(
+    candidates: list[dict[str, Any]],
+    purpose: str,
+) -> dict[str, Any] | None:
+    """Escolhe um unico botao. Empate entre textos diferentes = ambiguo (None)."""
+    ranked = rank_actions(candidates, purpose)
+    if not ranked:
+        return None
+    best_score, best = ranked[0]
+    rivals = {
+        norm(item["text"])
+        for score, item in ranked
+        if score == best_score
+    }
+    if len(rivals) > 1:
+        return {"ambiguous": sorted(rivals)}
+    return best
+
+
+def locate_action(page: Any, purpose: str) -> dict[str, Any] | None:
+    """Retorna {"text": ...} do botao escolhido, {"ambiguous": [...]} ou None."""
+    chosen = choose_action(page.evaluate(JS_ACTIONS), purpose)
+    if not chosen or "ambiguous" in chosen:
+        return chosen
+    if not page.evaluate(JS_MARK_ACTION, [chosen["index"], purpose]):
+        return None
+    return {"text": chosen["text"], "source": "adaptive"}
+
+
+def click_action(page: Any, purpose: str) -> None:
+    page.locator(f'[data-pje-rpa-action="{purpose}"]').first.click()
+
+
+def page_messages(page: Any) -> list[str]:
+    try:
+        return list(page.evaluate(JS_MESSAGES))
+    except Exception:
+        return []

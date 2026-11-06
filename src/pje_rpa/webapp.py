@@ -31,6 +31,9 @@ from .signer import PJeOfficeSigner
 from .totp import gerar_totp, normalizar_chave
 
 
+INSPECTION_TIMEOUT_S = 30 * 60
+
+
 class _Session:
     """Guarda o estado de uma execucao e a fila de eventos para a pagina (SSE)."""
 
@@ -240,6 +243,18 @@ class RegistrationServer:
             def _broadcast(event, state):
                 session.emit("log", event=event, state=state)
 
+                if event in ("advance_button_located", "advance_button_clicked"):
+                    try:
+                        import json as _json
+
+                        last = audit.path.read_text(encoding="utf-8").splitlines()[-1]
+                        text = _json.loads(last).get("details", {}).get("text", "")
+                        verb = "BOTAO PARA AVANCAR" if event.endswith("located") else "CLICADO"
+                        session.emit("step", text=f"{verb}: {text}")
+                    except Exception:
+                        pass
+                    return
+
                 if event != "adaptive_form_evaluated":
                     return
 
@@ -336,7 +351,9 @@ class RegistrationServer:
                             text="Certificado temporario tratado. "
                                  "Edge aberto para inspecao.",
                         )
-                        session.inspection_close.wait()
+                        # Sem prazo, fechar a aba prenderia o servidor (nova execucao recusada).
+                        if not session.inspection_close.wait(INSPECTION_TIMEOUT_S):
+                            session.emit("step", text="Tempo de inspecao esgotado; fechando o Edge")
 
                     browser.close()
                 except Exception as exc:

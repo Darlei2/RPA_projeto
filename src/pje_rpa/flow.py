@@ -186,22 +186,38 @@ class PJeRegistrationFlow:
             self._fill_form()
         self._transition(FlowState.REVIEW, "form_filled", self.record.safe_summary())
 
+        # Botao de avancar: seletor homologado ou, se nao houver, o botao reconhecido
+        # pelo texto (cada PJe usa um rotulo). O ensaio tambem valida esta etapa.
+        advance = self._locate_action("confirm_data", "advance")
+        if advance is None or "ambiguous" in advance:
+            return self._failed(self._action_problem("avancar o formulario", advance))
+        self.audit.record("advance_button_located", self.state.value,
+                          {"text": advance["text"], "source": advance["source"]})
+
         if self.rehearsal:
             self.audit.record("rehearsal_stopped_before_submit", self.state.value)
             return self._result(
                 RunStatus.REHEARSAL_OK,
-                "Ensaio concluido sem envio ou assinatura; verifique os detalhes da auditoria",
+                f"Ensaio concluido: o robo clicaria em '{advance['text']}'. "
+                "Nada foi enviado nem assinado",
             )
 
-        self.browser.click("confirm_data")
+        self._click_action("confirm_data", "advance", advance)
+        self.audit.record("advance_button_clicked", self.state.value, {"text": advance["text"]})
         if blocked := self._blocked_reason():
             return self._blocked(blocked)
-        if not self.browser.visible("commitment_term", 10000):
-            return self._failed("Termo de compromisso nao localizado")
+        if not self.browser.visible("commitment_term", 15000):
+            messages = self._page_messages()
+            if messages:
+                return self._needs_human("O PJe recusou o formulario: " + " | ".join(messages))
+            return self._failed("Termo de compromisso nao localizado apos avancar o formulario")
         self._transition(FlowState.COMMITMENT_TERM, "commitment_term_detected",
                          {"autorizacao_ref": self.record.autorizacao_ref})
 
-        self.browser.click("sign_term")
+        sign = self._locate_action("sign_term", "sign")
+        if sign is None or "ambiguous" in sign:
+            return self._failed(self._action_problem("assinar o termo", sign))
+        self._click_action("sign_term", "sign", sign)
         self.signer.sign(self.certificate, self._password)
         self.audit.record("term_signed_via_pjeoffice", self.state.value)
 
@@ -210,6 +226,41 @@ class PJeRegistrationFlow:
             return self._blocked(blocked) if blocked else self._failed("Conclusao do cadastro nao confirmada")
         self._transition(FlowState.COMPLETED, "registration_completed")
         return self._result(RunStatus.COMPLETED, "Cadastro concluido e confirmado pela tela final")
+
+    def _locate_action(self, group: str, purpose: str) -> dict | None:
+        if self.browser.visible(group, 2500):
+            return {"text": f"seletor homologado {group}", "source": "config"}
+        if not hasattr(self.browser, "page"):
+            return None
+        from .adaptive_form import locate_action
+
+        try:
+            return locate_action(self.browser.page, purpose)
+        except Exception:
+            return None
+
+    def _click_action(self, group: str, purpose: str, found: dict) -> None:
+        if found["source"] == "config":
+            self.browser.click(group)
+            return
+        from .adaptive_form import click_action
+
+        click_action(self.browser.page, purpose)
+
+    def _page_messages(self) -> list[str]:
+        if not hasattr(self.browser, "page"):
+            return []
+        from .adaptive_form import page_messages
+
+        return [self._scrub(m) for m in page_messages(self.browser.page)]
+
+    @staticmethod
+    def _action_problem(what: str, found: dict | None) -> str:
+        if found and "ambiguous" in found:
+            return (f"Mais de um botao possivel para {what}: "
+                    + ", ".join(found["ambiguous"])
+                    + ". Homologue o seletor no .toml do tribunal")
+        return f"Botao para {what} nao localizado. Homologue o seletor no .toml do tribunal"
 
     def _certificate_mismatch(self) -> str | None:
         if _normalize_name(self.certificate.nome) != _normalize_name(self.record.nome_esperado):
