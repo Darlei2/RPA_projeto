@@ -401,6 +401,44 @@ def address_equivalent(
     return canonical(actual) == canonical(expected)
 
 
+def oab_check(text: str, numero: str, uf: str) -> str:
+    """Confere a OAB exibida pelo PJe, tolerando textos extras como "(Advogado)".
+
+    Retorna "ok", "uf_nao_exibida" (numero confere e nenhuma UF aparece ao lado),
+    "uf_divergente" ou "numero_divergente".
+    """
+    value = norm(text)
+    wanted = numbers(numero).lstrip("0")
+    if not wanted:
+        return "numero_divergente"
+
+    hits = [
+        m for m in re.finditer(r"\d[\d.\-]*\d|\d", value)
+        if numbers(m.group()).lstrip("0") == wanted
+    ]
+    if not hits:
+        return "numero_divergente"
+
+    ufs = {code.lower() for code in UF_NAMES}
+    seen = set()
+    for m in hits:
+        before = re.search(r"(?<![a-z])([a-z]{2})[\s/:\-]{0,3}$", value[:m.start()])
+        after = re.match(r"[\s/:\-]{0,3}([a-z]{2})(?![a-z])", value[m.end():])
+        for found in (before, after):
+            if found and found.group(1) in ufs:
+                seen.add(found.group(1))
+    for found in re.finditer(r"\boab\s*[/:\-]?\s*([a-z]{2})(?![a-z])", value):
+        if found.group(1) in ufs:
+            seen.add(found.group(1))
+
+    expected_uf = norm(str(uf))
+    if expected_uf in seen:
+        return "ok"
+    if seen:
+        return "uf_divergente"
+    return "uf_nao_exibida"
+
+
 def same(
     key: str,
     actual: str,
@@ -419,17 +457,8 @@ def same(
         return a == b if a and b else norm(actual) == norm(expected)
 
     if key == "oab":
-        a = norm(actual)
-        b = norm(expected)
-        uf = norm(expected.split("/")[-1])
-
-        return (
-            numbers(a) == numbers(b)
-            and re.search(
-                r"\b" + re.escape(uf) + r"\b",
-                a
-            ) is not None
-        )
+        numero, _, uf = expected.rpartition("/")
+        return oab_check(actual, numero, uf) in ("ok", "uf_nao_exibida")
 
     if key in ("logradouro", "complemento"):
         return address_equivalent(key, actual, expected)
@@ -643,37 +672,25 @@ def operate(
                 continue
 
             label = str(matches[0].get("label", ""))
+            result = oab_check(label, record.oab_numero, record.oab_uf)
 
-            found = re.search(
-                r"(?<!\d)\d[\d./-]*\d(?!\d)",
-                label,
-            )
-
-            if found is None:
-                report["pending"].append(
-                    "numero_oab_nao_identificado"
-                )
+            if result == "numero_divergente":
+                if re.search(r"\d", label):
+                    report["blocked"].append("identidade_divergente:oab_numero")
+                else:
+                    report["pending"].append("numero_oab_nao_identificado")
                 continue
 
-            if numbers(found.group()) != numbers(record.oab_numero):
-                report["blocked"].append(
-                    "identidade_divergente:oab_numero"
-                )
+            if result == "uf_divergente":
+                report["blocked"].append("identidade_divergente:oab_uf")
                 continue
 
             report["verified"].append("oab_numero")
-
-            uf = norm(str(record.oab_uf))
-
-            if re.search(
-                r"\b" + re.escape(uf) + r"\b",
-                norm(label),
-            ):
+            if result == "ok":
                 report["verified"].append("oab")
             else:
-                report.setdefault(
-                    "unverified", []
-                ).append("oab_uf")
+                # Numero confere e o PJe nao mostra a UF (ex.: "12345 (Advogado)").
+                report.setdefault("notes", []).append("oab_uf_nao_exibida")
 
             continue
 
