@@ -117,6 +117,16 @@ class PJeRegistrationFlow:
             return self._result(RunStatus.ALREADY_REGISTERED, "Advogado ja cadastrado neste PJe")
 
         if not self.browser.visible("registration_form", 10000):
+            # Execucao anterior ja enviou o formulario e parou no termo: retoma dali.
+            if self.browser.visible("commitment_term", 3000):
+                self._transition(FlowState.COMMITMENT_TERM, "commitment_term_resumed",
+                                 {"autorizacao_ref": self.record.autorizacao_ref})
+                if self.rehearsal:
+                    return self._result(
+                        RunStatus.REHEARSAL_OK,
+                        "Ensaio: o PJe ja esta no termo de compromisso; nada foi assinado",
+                    )
+                return self._sign_commitment()
             return self._failed("Formulario de cadastro nao localizado apos autenticacao")
         self._transition(FlowState.REGISTRATION_FORM, "registration_form_detected")
         if hasattr(self.browser, "page"):
@@ -213,7 +223,9 @@ class PJeRegistrationFlow:
             return self._failed("Termo de compromisso nao localizado apos avancar o formulario")
         self._transition(FlowState.COMMITMENT_TERM, "commitment_term_detected",
                          {"autorizacao_ref": self.record.autorizacao_ref})
+        return self._sign_commitment()
 
+    def _sign_commitment(self) -> RunResult:
         sign = self._locate_action("sign_term", "sign")
         if sign is None or "ambiguous" in sign:
             return self._failed(self._action_problem("assinar o termo", sign))

@@ -73,17 +73,40 @@ def choose_row(rows: list[list[str]], certificate: "CertificateInfo") -> int:
     )
 
 
+PJE_SSO_HOST = "sso.cloud.pje.jus.br"
+
+
+def authorization_allowed(labels: list[str], hosts: set[str]) -> bool:
+    """Aceita a janela "Autorizacao de site" so para https em host oficial esperado.
+
+    Ex.: "Endereco: https://pje.tjap.jus.br/1g" com hosts={"pje.tjap.jus.br", ...}.
+    """
+    from urllib.parse import urlparse
+
+    text = [label.strip() for label in labels]
+    if not any("deseja acessar o pjeoffice" in t.casefold() for t in text):
+        return False
+    addresses = [t.split(":", 1)[1].strip() for t in text if t.casefold().startswith("endere") and ":" in t]
+    if len(addresses) != 1:
+        return False
+    url = urlparse(addresses[0])
+    host = (url.hostname or "").lower()
+    return url.scheme == "https" and host.endswith(".jus.br") and host in hosts
+
+
 def _norm(value: str) -> str:
     return " ".join(value.upper().split())
 
 
 class PJeOfficeSigner(SignerPort):
-    def __init__(self, config: SignerConfig) -> None:
+    def __init__(self, config: SignerConfig, site_hosts: tuple[str, ...] = ()) -> None:
         if not os.path.isfile(config.jab_dll):
             raise SignerError(f"Java Access Bridge nao encontrado em {config.jab_dll}")
         os.environ["RC_JAVA_ACCESS_BRIDGE_DLL"] = config.jab_dll
         _import_jab_quietly()
         self.config = config
+        # Enderecos que podem ser autorizados no PJeOffice: SSO do PJe + host do tribunal.
+        self.site_hosts = {PJE_SSO_HOST, *(h.lower() for h in site_hosts if h)}
         self._jab = _start_jab()
         self._login_complete = None
 
@@ -141,10 +164,10 @@ class PJeOfficeSigner(SignerPort):
 
     def _authorize_official_site(self, window):
         nodes = self._tree(window)
-        labels = {(n.context_info.name or '').strip() for n in nodes if n.context_info.role == 'label'}
-        required = {'A aplicação \'PJe\' deseja acessar o PJeOffice.', 'Endereço: https://sso.cloud.pje.jus.br/auth/realms/pje', 'Deseja autorizar?'}
-        if not required.issubset(labels):
-            raise SignerError('Endereco de autorizacao nao corresponde ao SSO oficial do PJe')
+        labels = [(n.context_info.name or '').strip() for n in nodes if n.context_info.role == 'label']
+        if not authorization_allowed(labels, self.site_hosts):
+            address = next((l for l in labels if l.casefold().startswith('endere')), '?')
+            raise SignerError(f'PJeOffice pediu autorizacao para endereco nao reconhecido ({address})')
         button = _find(nodes, 'push button', 'Sim desta vez')
         if button is None or not _has_state(self._jab, button, 'enabled', 'ativado'):
             raise SignerError('Botao de autorizacao temporaria nao disponivel')

@@ -7,6 +7,8 @@ e removido (com a chave privada) ao terminar.
 """
 from __future__ import annotations
 
+from urllib.parse import urlparse
+
 import json
 import queue
 import threading
@@ -312,7 +314,10 @@ class RegistrationServer:
             audit.on_record = _broadcast
             session.emit("run", run_id=audit.run_id)
 
-            signer = PJeOfficeSigner(self.config.signer)
+            signer = PJeOfficeSigner(
+                self.config.signer,
+                site_hosts=(urlparse(self.config.base_url).hostname or "",),
+            )
             browser = PlaywrightBrowser(self.config)
             flow = PJeRegistrationFlow(
                 self.config, record, info, password, browser, signer, audit,
