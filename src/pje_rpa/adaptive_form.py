@@ -151,7 +151,56 @@ JS_SNAPSHOT = r"""() => {
     }
   }
 
-  return {controls, identity};
+
+  const location = [];
+
+  const isLocationLabel = value =>
+    /^(?:munic[i?]pio|cidade)\s*\/\s*uf\s*:?\s*$/i
+      .test(value.trim());
+
+  for (const el of document.querySelectorAll(
+    'span,label,td,th,dt,strong,b'
+  )) {
+    if (!visible(el) || !isLocationLabel(txt(el))) continue;
+
+    const cell = el.closest('td,th');
+    const parent = el.parentElement;
+
+    const siblings = parent
+      ? [...parent.children].slice(
+          [...parent.children].indexOf(el) + 1
+        )
+      : [];
+
+    const candidates = [
+      el.nextElementSibling,
+      ...siblings,
+      cell?.nextElementSibling,
+      parent?.nextElementSibling
+    ];
+
+    for (const candidate of candidates) {
+      if (!candidate || !visible(candidate)) continue;
+
+      const value = txt(candidate).trim();
+
+      if (
+        !value ||
+        value.length > 100 ||
+        isLocationLabel(value)
+      ) continue;
+
+      location.push(value);
+      break;
+    }
+  }
+
+  return {
+    controls,
+    identity,
+    location: [...new Set(location)]
+  };
+
 }"""
 
 
@@ -312,6 +361,45 @@ def desired(record: Any) -> dict[str, str]:
     }
 
 
+
+def address_equivalent(
+    key: str,
+    actual: str,
+    expected: str,
+) -> bool:
+    """Compara apenas abreviacoes e formatacao equivalentes."""
+
+    aliases = {
+        "logradouro": {
+            "r": "rua",
+            "av": "avenida",
+            "rod": "rodovia",
+            "estr": "estrada",
+            "est": "estrada",
+            "trav": "travessa",
+            "tv": "travessa",
+        },
+        "complemento": {
+            "apt": "apartamento",
+            "apto": "apartamento",
+            "ap": "apartamento",
+            "apart": "apartamento",
+            "bl": "bloco",
+        },
+    }
+
+    def canonical(value: str) -> str:
+        value = norm(value)
+        value = re.sub("[^a-z0-9 ]", " ", value)
+        tokens = value.split()
+        return " ".join(
+            aliases[key].get(token, token)
+            for token in tokens
+        )
+
+    return canonical(actual) == canonical(expected)
+
+
 def same(
     key: str,
     actual: str,
@@ -342,7 +430,37 @@ def same(
             ) is not None
         )
 
+    if key in ("logradouro", "complemento"):
+        return address_equivalent(key, actual, expected)
+
     return norm(actual) == norm(expected)
+
+
+def static_location_matches(
+    value: str,
+    city: str,
+    uf: str,
+) -> bool:
+    parts = re.split(
+        r"\s*/\s*",
+        norm(value),
+        maxsplit=1,
+    )
+
+    if len(parts) != 2:
+        return False
+
+    expected_state = norm(
+        UF_NAMES.get(str(uf).upper(), "")
+    )
+
+    return (
+        parts[0] == norm(city)
+        and parts[1] in {
+            norm(uf),
+            expected_state,
+        }
+    )
 
 
 def scan(page: Any) -> dict[str, Any]:
@@ -397,6 +515,27 @@ def operate(
     initial = scan(page)
     controls = initial["controls"]
 
+    location_values = initial.get("location", [])
+
+    location_found = bool(location_values)
+
+    location_matches = (
+        location_found
+        and all(
+            static_location_matches(
+                value,
+                expected["cidade"],
+                expected["uf"],
+            )
+            for value in location_values
+        )
+    )
+
+    if location_found and not location_matches:
+        report["pending"].append(
+            "municipio_uf_divergente"
+        )
+
     grouped: dict[
         str, list[tuple[int, dict[str, Any]]]
     ] = {}
@@ -428,6 +567,19 @@ def operate(
             report["pending"].append(
                 "campo_obrigatorio_desconhecido"
             )
+
+        elif (
+            field.get("type") == "checkbox"
+            and not field.get("required")
+        ):
+            if field.get("checked"):
+                report["pending"].append(
+                    "checkbox_opcional_ja_marcado"
+                )
+            else:
+                report.setdefault(
+                    "ignored_optional", []
+                ).append("checkbox_desmarcado")
 
         elif (
             field.get("type") in ("checkbox", "radio")
@@ -518,9 +670,9 @@ def operate(
             ):
                 report["verified"].append("oab")
             else:
-                report["pending"].append(
-                    "oab_uf_nao_exibida"
-                )
+                report.setdefault(
+                    "unverified", []
+                ).append("oab_uf")
 
             continue
 
@@ -581,6 +733,11 @@ def operate(
         chosen = selected.get(key)
 
         if not chosen:
+            if key in ("cidade", "uf") and location_found:
+                if location_matches:
+                    report["preserved"].append(key)
+                continue
+
             report["absent"].append(key)
             continue
 

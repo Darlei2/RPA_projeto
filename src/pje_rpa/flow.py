@@ -127,6 +127,36 @@ class PJeRegistrationFlow:
                 self.record,
             )
 
+            # Preservar enderecos preexistentes em ambos os modos.
+            # Registrar divergencias sem modificar os dados do PJe.
+            prefix = "valor_preexistente_divergente:"
+            allowed = {"logradouro", "complemento"}
+            remaining = []
+            preserved_address = []
+
+            for issue in report.get("pending", []):
+                if isinstance(issue, str) and issue.startswith(prefix):
+                    field = issue[len(prefix):]
+                    if field in allowed:
+                        preserved_address.append(field)
+                        continue
+                remaining.append(issue)
+
+            if preserved_address:
+                report["pending"] = remaining
+                report.setdefault("preserved", []).extend(
+                    preserved_address
+                )
+                report["address_divergences_preserved"] = sorted(
+                    set(preserved_address)
+                )
+
+            if report.get("unverified") and not self.rehearsal:
+                report["pending"].extend(
+                    "verificacao_obrigatoria:" + key
+                    for key in report["unverified"]
+                )
+
             self.audit.record(
                 "adaptive_form_evaluated",
                 self.state.value,
@@ -160,7 +190,7 @@ class PJeRegistrationFlow:
             self.audit.record("rehearsal_stopped_before_submit", self.state.value)
             return self._result(
                 RunStatus.REHEARSAL_OK,
-                "Ensaio concluido: login, identidade e formulario validados; nada foi enviado nem assinado",
+                "Ensaio concluido sem envio ou assinatura; verifique os detalhes da auditoria",
             )
 
         self.browser.click("confirm_data")

@@ -38,6 +38,8 @@ class _Session:
         self.events: "queue.Queue[dict]" = queue.Queue()
         self.code_box: "queue.Queue[str | None]" = queue.Queue(maxsize=1)
         self.running = False
+        self.inspection_active = False
+        self.inspection_close = threading.Event()
 
     def emit(self, kind: str, **data) -> None:
         self.events.put({"kind": kind, **data})
@@ -84,6 +86,22 @@ class RegistrationServer:
                 body = self.rfile.read(length)
                 if self.path == "/start":
                     self._start(body)
+                elif self.path == "/close-inspection":
+                    if not server.rehearsal or not server.session.inspection_active:
+                        self._send(
+                            409,
+                            "application/json",
+                            b'{"error":"inspecao indisponivel"}',
+                        )
+                        return
+
+                    server.session.inspection_close.set()
+                    self._send(
+                        200,
+                        "application/json",
+                        b'{"ok":true}',
+                    )
+
                 elif self.path == "/code":
                     try:
                         server.session.code_box.put_nowait((json.loads(body).get("code") or "").strip() or None)
@@ -120,7 +138,10 @@ class RegistrationServer:
                     event = server.session.events.get()
                     self.wfile.write(f"data: {json.dumps(event, ensure_ascii=False)}\n\n".encode("utf-8"))
                     self.wfile.flush()
-                    if event["kind"] in {"done", "error"}:
+                    if event["kind"] == "inspection_closed" or (
+                        not server.rehearsal
+                        and event["kind"] in {"done", "error"}
+                    ):
                         break
 
             def _start(self, body):
@@ -216,7 +237,64 @@ class RegistrationServer:
                     thumbprint = installed
 
             audit = AuditLog(self.audit_root)
-            audit.on_record = lambda event, state: session.emit("log", event=event, state=state)
+            def _broadcast(event, state):
+                session.emit("log", event=event, state=state)
+
+                if event != "adaptive_form_evaluated":
+                    return
+
+                try:
+                    import json as _json
+
+                    lines = audit.path.read_text(
+                        encoding="utf-8"
+                    ).splitlines()
+
+                    details = _json.loads(
+                        lines[-1]
+                    ).get("details", {})
+
+                    sections = {
+                        "verified": "IDENTIDADE VALIDADA",
+                        "filled": "PREENCHIDOS",
+                        "preserved": "PRESERVADOS",
+                        "absent": "AUSENTES",
+                        "pending": "REVISAO NECESSARIA",
+                        "blocked": "DIVERGENCIAS",
+                    }
+
+                    for key, label in sections.items():
+                        items = details.get(key, [])
+
+                        if not isinstance(items, list) or not items:
+                            continue
+
+                        names = [
+                            str(item)
+                            for item in items
+                            if isinstance(item, str)
+                        ]
+
+                        session.emit(
+                            "step",
+                            text=label + ": " + ", ".join(names[:30]),
+                        )
+
+                    count = details.get("unknown_optional", 0)
+
+                    if isinstance(count, int) and count:
+                        session.emit(
+                            "step",
+                            text=f"CONTROLES OPCIONAIS DESCONHECIDOS: {count}",
+                        )
+
+                except Exception:
+                    session.emit(
+                        "step",
+                        text="ATENCAO: relatorio detalhado indisponivel",
+                    )
+
+            audit.on_record = _broadcast
             session.emit("run", run_id=audit.run_id)
 
             signer = PJeOfficeSigner(self.config.signer)
@@ -241,11 +319,6 @@ class RegistrationServer:
         finally:
             password = ""
             totp_secret = ""  # melhor esforco: strings Python nao garantem limpeza da RAM
-            if browser is not None:
-                try:
-                    browser.close()
-                except Exception:
-                    pass
             if thumbprint:
                 try:
                     store.remove(thumbprint)
@@ -253,7 +326,40 @@ class RegistrationServer:
                     session.emit("step", text="Certificado removido do repositorio")
                 except Exception:
                     session.emit("step", text="ATENCAO: remova o certificado manualmente do repositorio do Windows")
+            close_error = None
+            if browser is not None:
+                try:
+                    if self.rehearsal:
+                        session.inspection_active = True
+                        session.emit(
+                            "inspection_ready",
+                            text="Certificado temporario tratado. "
+                                 "Edge aberto para inspecao.",
+                        )
+                        session.inspection_close.wait()
+
+                    browser.close()
+                except Exception as exc:
+                    close_error = type(exc).__name__
+                    session.emit(
+                        "step",
+                        text="ERRO AO FECHAR EDGE: " + close_error,
+                    )
+                finally:
+                    session.inspection_active = False
+
             session.running = False
+
+            if self.rehearsal:
+                session.emit(
+                    "inspection_closed",
+                    text=(
+                        "Inspecao encerrada; fechamento solicitado."
+                        if close_error is None
+                        else "Falha no fechamento: " + close_error
+                    ),
+                    ok=close_error is None,
+                )
 
     def _provide_code(self, session: _Session, message: str, totp_secret: str) -> "str | None":
         if not totp_secret:
@@ -373,6 +479,7 @@ _PAGE = """<!doctype html>
       <button id="sendcode">Enviar codigo</button>
     </div>
     <div id="verdict" class="hidden"></div>
+    <button id="close_inspection" class="hidden" type="button">Encerrar inspecao e fechar Edge</button>
     <button id="retry" class="hidden" type="button">Corrigir dados e tentar novamente</button>
   </div>
 <script>
@@ -406,20 +513,57 @@ $("go").onclick=async()=>{
     telefone:$("telefone").value,autorizacao_ref:$("autorizacao_ref").value,
     endereco:{cep:$("cep").value,logradouro:$("logradouro").value,numero:$("numero").value,
       complemento:$("complemento").value,bairro:$("bairro").value,cidade:$("cidade").value,uf:$("uf").value}};
-  const es=new EventSource("/events");
-  es.onmessage=ev=>{const m=JSON.parse(ev.data);
+  let es=null;
+  const receive=ev=>{const m=JSON.parse(ev.data);
     if(m.kind==="step")addStep(m.text);
     else if(m.kind==="log")addStep(m.event.replace(/_/g," "),"ok");
     else if(m.kind==="code_request"){addStep(m.text,"warn");$("codebox").classList.remove("hidden");}
+    else if(m.kind==="inspection_ready"){
+      addStep(m.text,"warn");
+      $("close_inspection").classList.remove("hidden");
+      $("retry").classList.add("hidden");
+    }
+    else if(m.kind==="inspection_closed"){
+      addStep(m.text,m.ok===false?"err":"ok");
+      $("close_inspection").classList.add("hidden");
+      $("retry").classList.remove("hidden");
+      es.close();
+    }
     else if(m.kind==="done"){const ok=["COMPLETED","ALREADY_REGISTERED","REHEARSAL_OK"].includes(m.status);
-      show(ok,m.status+" — "+m.reason);es.close();}
-    else if(m.kind==="error"){show(false,m.reason);es.close();}};
-  await fetch("/start",{method:"POST",body:JSON.stringify({pfx_base64:pfxB64,password:$("password").value,totp_secret:$("totp_secret").value,cadastro})});
+      show(ok,m.status+" — "+m.reason);if(MODE!=="ensaio")es.close();}
+    else if(m.kind==="error"){show(false,m.reason);if(MODE!=="ensaio")es.close();}};
+  const started=await fetch("/start",{method:"POST",body:JSON.stringify({pfx_base64:pfxB64,password:$("password").value,totp_secret:$("totp_secret").value,cadastro})});
+  if(!started.ok){
+    show(false,"Nao foi possivel iniciar a execucao.");
+    return;
+  }
+  es=new EventSource("/events");
+  es.onmessage=receive;
+};
+$("close_inspection").onclick=async()=>{
+  const button=$("close_inspection");
+  button.disabled=true;
+
+  try{
+    const response=await fetch("/close-inspection",{
+      method:"POST",
+      headers:{"Content-Type":"application/json"},
+      body:"{}"
+    });
+
+    if(!response.ok)throw new Error("Falha ao encerrar inspecao");
+
+    addStep("Fechamento do Edge solicitado.","warn");
+  }catch(error){
+    button.disabled=false;
+    addStep("Nao foi possivel fechar o Edge pelo painel.","err");
+  }
 };
 $("sendcode").onclick=async()=>{await fetch("/code",{method:"POST",body:JSON.stringify({code:$("code").value})});
   $("codebox").classList.add("hidden");};
 function show(ok,text){const v=$("verdict");v.textContent=text;v.className="verdict "+(ok?"ok":"err");
-  v.classList.remove("hidden");$("retry").classList.remove("hidden");}
+  v.classList.remove("hidden");
+  if(MODE!=="ensaio")$("retry").classList.remove("hidden");}
 $("retry").onclick=()=>{
    $("form").classList.remove("hidden");$("progress").classList.add("hidden");
    $("steps").replaceChildren();$("codebox").classList.add("hidden");

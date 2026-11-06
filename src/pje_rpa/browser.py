@@ -146,9 +146,21 @@ class PlaywrightBrowser(BrowserPort):
         return next((marker for marker in markers if marker.casefold() in body), None)
 
     def close(self) -> None:
-        self._context.close()
-        self._browser.close()
-        self._pw.stop()
+        errors = []
+        for name, action in (
+            ("context", self._context.close),
+            ("browser", self._browser.close),
+            ("playwright", self._pw.stop),
+        ):
+            try:
+                action()
+            except Exception as exc:
+                errors.append(f"{name}:{type(exc).__name__}")
+        if errors:
+            raise BrowserError(
+                "Falha ao encerrar Edge/Playwright: "
+                + ", ".join(errors)
+            )
 
     def outline(self) -> dict[str, Any]:
         try:
