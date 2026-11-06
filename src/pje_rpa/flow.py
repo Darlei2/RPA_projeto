@@ -237,7 +237,31 @@ class PJeRegistrationFlow:
             blocked = self._blocked_reason()
             return self._blocked(blocked) if blocked else self._failed("Conclusao do cadastro nao confirmada")
         self._transition(FlowState.COMPLETED, "registration_completed")
-        return self._result(RunStatus.COMPLETED, "Cadastro concluido e confirmado pela tela final")
+        reason = "Cadastro concluido e confirmado pela tela final"
+        if hasattr(self.browser, "page"):
+            reason += ". " + self._request_password_link()
+        return self._result(RunStatus.COMPLETED, reason)
+
+    def _request_password_link(self) -> str:
+        """Sem senha cadastrada a credencial nao serve (so certificado/jus postulandi):
+        sai do PJe e pede o link de criacao de senha para o e-mail cadastrado."""
+        from .credencial import request_password_link
+
+        try:
+            step = request_password_link(self.browser, self.config,
+                                         self.record.cpf_esperado, self.record.email)
+        except Exception as exc:  # noqa: BLE001 - o cadastro ja esta concluido
+            step = None
+            detail = f"Falha ao pedir o link de senha: {type(exc).__name__}"
+        else:
+            detail = self._scrub(step.detail) if not step.ok else step.detail
+        event = "password_link_requested" if step and step.ok else "password_link_request_failed"
+        self.audit.record(event, self.state.value, {"detail": detail})
+        if step and step.ok:
+            return ("Link de criacao de senha enviado ao e-mail cadastrado: "
+                    "rode scripts\\criar-senha.ps1 para cadastrar a senha e testar o login")
+        return ("ATENCAO: " + detail + ". Peca 'Esqueceu a senha?' manualmente ou rode "
+                "scripts\\criar-senha.ps1")
 
     def _locate_action(self, group: str, purpose: str) -> dict | None:
         if self.browser.visible(group, 2500):

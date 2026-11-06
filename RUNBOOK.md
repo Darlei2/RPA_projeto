@@ -131,9 +131,25 @@ Para cada tribunal, nesta ordem:
 .\scripts\sondar.ps1 -Tribunal trf6          # abre so o login: URL e botao de certificado ok?
 .\scripts\ensaiar.ps1 -Tribunal trf6         # login real + formulario, para antes de enviar
 # conferido o ensaio: selectors_approved = true e allow_live_submission = true no trf6.toml
-.\scripts\executar-live.ps1 -Tribunal trf6   # cadastro real
+.\scripts\executar-live.ps1 -Tribunal trf6   # cadastro real + pedido do link de senha
+.\scripts\criar-senha.ps1 -Tribunal trf6     # link do e-mail -> senha -> testa CPF + senha + 2FA
 .\scripts\relatorio.ps1                      # melhor resultado por tribunal e situacao da meta
 ```
+
+### Credencial utilizavel (CPF + senha + 2FA)
+
+So o cadastro com certificado nao basta: sem senha o PJe nao libera o acesso por CPF
+(ou trata o usuario como jus postulandi). Por isso, depois de cada cadastro:
+
+1. o termo de compromisso precisa estar assinado (o robo assina) e o e-mail correto;
+2. o robo sai do PJe, abre a pagina inicial, clica em "Esqueceu a senha?" e informa o CPF
+   (e o e-mail, se o tribunal pedir); o PJe manda o link de criacao de senha ao e-mail cadastrado;
+3. com o link em maos, `criar-senha.ps1` abre o link, cadastra a senha e testa o login com
+   CPF + senha + codigo do 2FA. Se o pedido automatico do link falhar, o mesmo script refaz o pedido.
+
+E-mail errado no cadastro: entre com o certificado, corrija o e-mail nos dados do usuario e
+peca o link de novo (`criar-senha.ps1`, respondendo S ao pedido do link).
+O relatorio so conta para a meta os tribunais com cadastro real **e** credencial testada.
 
 Meta de validacao: cadastro real (`COMPLETED`) em pelo menos 5 tribunais, com 1 TRF, 1 TRT e 1 TJ.
 `ALREADY_REGISTERED` nao conta: escolha tribunais em que o advogado ainda nao tem cadastro.

@@ -63,10 +63,22 @@ def test_relatorio_e_meta(tmp_path):
     tjap = next(r for r in data["tribunais"] if r["tribunal"].startswith("TJAP"))
     assert tjap["status"] == "COMPLETED" and tjap["execucoes"] == 2
     assert data["meta"]["tribunais_com_cadastro_real"] == 1
-    assert data["meta"]["ramos_faltando"] == ["TRF", "TRT"]
+    assert data["meta"]["ramos_faltando"] == ["TRF", "TRT", "TJ"]
     assert not data["meta"]["atingida"]
     assert "Ainda falta" in format_relatorio(data)
 
     _run(tmp_path, "4", "TRT2 - 1o grau", "COMPLETED")
     _run(tmp_path, "5", "TRF6 - 1o grau", "COMPLETED")
-    assert relatorio(tmp_path, goal=3)["meta"]["atingida"]
+    data = relatorio(tmp_path, goal=3)
+    assert data["meta"]["tribunais_com_cadastro_real"] == 3
+    assert not data["meta"]["atingida"]  # falta testar senha + 2FA
+
+    for n, tribunal in enumerate(["TJAP - 1o grau", "TRT2 - 1o grau", "TRF6 - 1o grau"]):
+        d = tmp_path / f"c{n}"
+        d.mkdir()
+        (d / "result.json").write_text(json.dumps({"kind": "credencial", "status": "CREDENTIAL_OK",
+                                                   "details": {"tribunal": tribunal}}))
+    data = relatorio(tmp_path, goal=3)
+    assert data["meta"]["tribunais_com_credencial_testada"] == 3
+    assert data["meta"]["atingida"]
+    assert "testada" in format_relatorio(data)

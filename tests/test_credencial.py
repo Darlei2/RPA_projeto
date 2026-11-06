@@ -1,0 +1,77 @@
+"""Etapas de senha contra um SSO simulado (paginas locais no formato do Keycloak do PJe)."""
+import dataclasses
+from pathlib import Path
+
+import pytest
+
+from pje_rpa.config import load_config
+from pje_rpa.credencial import request_password_link, set_password, test_login as login_with_password
+
+PROJECT = Path(__file__).resolve().parents[1]
+HOST = "https://pje.teste.jus.br"
+
+PAGES = {
+    "/login": """<h1>Login</h1>
+      <p id=msg></p>
+      <script>if(location.search.includes('sent'))msg.textContent='Voce devera receber um e-mail em breve com mais instrucoes.';
+              if(location.search.includes('bad'))msg.innerHTML='<span id=input-error>Usuario ou senha invalidos.</span>';</script>
+      <form action="/otp"><input id=username name=username><input id=password name=password type=password>
+      <input id=kc-login type=submit value=Entrar></form>
+      <input id=kc-pje-office type=button value="CERTIFICADO DIGITAL">
+      <a href="/reset-credentials">Esqueceu sua senha?</a>""",
+    "/reset-credentials": """<form action="/login"><input type=hidden name=sent value=1>
+      <label for=username>CPF</label><input id=username name=username>
+      <div id=kc-form-buttons><input type=submit value=Enviar></div></form>""",
+    "/action": """<a href="/update">Clique aqui para prosseguir</a>""",
+    "/update": """<form action="/updated"><input id=password-new type=password><input id=password-confirm type=password>
+      <div id=kc-form-buttons><input type=submit value=Enviar></div></form>""",
+    "/updated": """<p>Sua conta foi atualizada.</p>""",
+    "/otp": """<form action="/painel"><input id=otp name=otp><input id=kc-login type=submit value=Entrar></form>""",
+    "/painel": """<h1>Painel do advogado</h1>""",
+}
+
+
+@pytest.fixture()
+def browser():
+    pytest.importorskip("playwright.sync_api")
+    from pje_rpa.browser import PlaywrightBrowser
+
+    config = load_config(PROJECT / "tribunais" / "trf6.toml")
+    config = dataclasses.replace(
+        config, base_url=HOST + "/login",
+        browser=dataclasses.replace(config.browser, channel="", headless=True, timeout_ms=5000),
+    )
+    try:
+        b = PlaywrightBrowser(config)
+    except Exception as exc:  # noqa: BLE001
+        pytest.skip(f"chromium indisponivel: {exc}")
+
+    def serve(route):
+        path = "/" + route.request.url.split("/", 3)[3].split("?")[0]
+        route.fulfill(status=200, content_type="text/html; charset=utf-8",
+                      body="<html><body>" + PAGES.get(path, "nao encontrado") + "</body></html>")
+
+    b._context.route(HOST + "/**", serve)
+    b.config = config
+    yield b
+    b.close()
+
+
+def test_pede_link_cadastra_senha_e_testa_login(browser):
+    config = browser.config
+    step = request_password_link(browser, config, "123.456.789-01", "adv@exemplo.com.br")
+    assert step.ok, step.detail
+
+    step = set_password(browser, config, HOST + "/action?key=abc", "S3nha-forte!")
+    assert step.ok, step.detail
+
+    codes = []
+    step = login_with_password(browser, config, "12345678901", "S3nha-forte!",
+                               lambda msg: codes.append(msg) or "123456")
+    assert step.ok, step.detail
+    assert codes, "o 2FA deveria ter sido pedido"
+
+
+def test_link_fora_do_jus_br_e_recusado(browser):
+    step = set_password(browser, browser.config, "https://phishing.example.com/reset", "x")
+    assert not step.ok and ".jus.br" in step.detail

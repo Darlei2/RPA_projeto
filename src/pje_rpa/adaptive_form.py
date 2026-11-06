@@ -979,7 +979,7 @@ JS_MESSAGES = r"""() => {
     getComputedStyle(e).visibility !== 'hidden';
   const sel = '.rich-messages,.rich-message,.ui-messages-error,.ui-message-error,' +
     '.alert-danger,.alert-error,.erro,.error,.errors,.mensagem-erro,[role=alert],' +
-    '.mat-error,.invalid-feedback';
+    '.mat-error,.invalid-feedback,#input-error,.pf-m-error,.kc-feedback-text,.alert-warning';
   const out = [];
   for (const el of document.querySelectorAll(sel)) {
     if (!visible(el)) continue;

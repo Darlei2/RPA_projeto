@@ -74,6 +74,7 @@ def sondar(config: AppConfig) -> dict[str, Any]:
 
 def relatorio(audit_root: Path, goal: int = GOAL_TRIBUNAIS) -> dict[str, Any]:
     best: dict[str, dict[str, Any]] = {}
+    credential_ok: set[str] = set()
     for result_path in sorted(audit_root.glob("*/result.json")):
         try:
             data = json.loads(result_path.read_text(encoding="utf-8"))
@@ -81,6 +82,10 @@ def relatorio(audit_root: Path, goal: int = GOAL_TRIBUNAIS) -> dict[str, Any]:
             continue
         tribunal = str((data.get("details") or {}).get("tribunal") or "").strip()
         status = str(data.get("status") or "")
+        if data.get("kind") == "credencial":
+            if tribunal and status == "CREDENTIAL_OK":
+                credential_ok.add(re.sub(r"\s+", " ", tribunal.upper()))
+            continue
         if not tribunal or status not in STATUS_RANK:
             continue
         when = _first_timestamp(result_path.parent / "audit.jsonl")
@@ -99,17 +104,21 @@ def relatorio(audit_root: Path, goal: int = GOAL_TRIBUNAIS) -> dict[str, Any]:
         else:
             current["execucoes"] = candidate["execucoes"]
 
+    for key, row in best.items():
+        row["credencial"] = key in credential_ok
     rows = sorted(best.values(), key=lambda r: (r["ramo"], r["tribunal"]))
     real = [r for r in rows if r["status"] == "COMPLETED"]
-    ramos_ok = {r["ramo"] for r in real}
-    faltam = [r for r in GOAL_RAMOS if r not in ramos_ok]
+    # Credencial utilizavel = cadastro real + senha criada + login CPF/senha/2FA testado.
+    ready = [r for r in real if r["credencial"]]
+    faltam = [r for r in GOAL_RAMOS if r not in {x["ramo"] for x in ready}]
     return {
         "tribunais": rows,
         "meta": {
             "tribunais_com_cadastro_real": len(real),
+            "tribunais_com_credencial_testada": len(ready),
             "minimo": goal,
             "ramos_faltando": faltam,
-            "atingida": len(real) >= goal and not faltam,
+            "atingida": len(ready) >= goal and not faltam,
         },
     }
 
@@ -124,18 +133,21 @@ def _first_timestamp(path: Path) -> str | None:
 
 
 def format_relatorio(data: dict[str, Any]) -> str:
-    lines = [f"{'RAMO':<6}{'TRIBUNAL':<28}{'MELHOR RESULTADO':<20}{'EXEC.':<7}QUANDO (UTC)"]
+    lines = [f"{'RAMO':<6}{'TRIBUNAL':<28}{'MELHOR RESULTADO':<20}{'SENHA+2FA':<11}{'EXEC.':<7}QUANDO (UTC)"]
     for row in data["tribunais"]:
         lines.append(
             f"{row['ramo']:<6}{row['tribunal'][:27]:<28}{row['status']:<20}"
+            f"{'testada' if row.get('credencial') else '-':<11}"
             f"{row['execucoes']:<7}{(row['quando_utc'] or '')[:16]}"
         )
     meta = data["meta"]
     lines.append("")
+    lines.append(f"Cadastros reais concluidos: {meta['tribunais_com_cadastro_real']}")
     lines.append(
-        f"Cadastros reais concluidos: {meta['tribunais_com_cadastro_real']} de {meta['minimo']} tribunais"
+        f"Com credencial CPF + senha + 2FA testada: {meta['tribunais_com_credencial_testada']}"
+        f" de {meta['minimo']} tribunais"
     )
     if meta["ramos_faltando"]:
-        lines.append("Ainda falta cadastro real em: " + ", ".join(meta["ramos_faltando"]))
+        lines.append("Ainda falta credencial testada em: " + ", ".join(meta["ramos_faltando"]))
     lines.append("META ATINGIDA" if meta["atingida"] else "Meta ainda nao atingida")
     return "\n".join(lines)

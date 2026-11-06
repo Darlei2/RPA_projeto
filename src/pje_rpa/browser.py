@@ -69,6 +69,9 @@ class BrowserPort(ABC):
     @abstractmethod
     def close(self) -> None: ...
 
+    def reset_session(self) -> None:
+        """Sai do PJe: descarta cookies/sessao do navegador (equivale a deslogar)."""
+
     def outline(self) -> dict[str, Any]:
         """Estrutura visivel da tela atual, sem valores de campos (para homologacao)."""
         return {}
@@ -111,6 +114,13 @@ class PlaywrightBrowser(BrowserPort):
 
     def open(self, url: str) -> None:
         self.page.goto(url, wait_until="domcontentloaded")
+
+    def reset_session(self) -> None:
+        self._context.clear_cookies()
+        try:
+            self.page.goto("about:blank")
+        except Exception:
+            pass
 
     def visible(self, group: str, timeout_ms: int | None = None) -> bool:
         return self._wait_visible(group, timeout_ms or 1200) is not None
