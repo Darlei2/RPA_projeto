@@ -106,6 +106,7 @@ class PlaywrightBrowser(BrowserPort):
             except Exception:
                 pass  # versoes antigas nao tem essa permissao (e tambem nao fazem a pergunta)
         self.page = self._context.new_page()
+        self.last_spec = ""  # ultimo seletor que casou (para a sondagem de tribunais)
         self.page.set_default_timeout(config.browser.timeout_ms)
 
     def open(self, url: str) -> None:
@@ -190,9 +191,16 @@ class PlaywrightBrowser(BrowserPort):
         deadline = time.monotonic() + timeout_ms / 1000
         while True:
             for spec in specs:
-                locator = self._locator(spec).first
                 try:
+                    if spec.startswith("url="):
+                        # Ex.: url=cadastroConcluido -> a pagina atual contem esse trecho.
+                        if spec[4:].casefold() in (self.page.url or "").casefold():
+                            self.last_spec = spec
+                            return self.page.locator("body")
+                        continue
+                    locator = self._locator(spec).first
                     if locator.is_visible():
+                        self.last_spec = spec
                         return locator
                 except Exception:
                     continue

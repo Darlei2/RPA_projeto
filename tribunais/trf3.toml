@@ -1,0 +1,9 @@
+herda = "_comum.toml"
+
+# URL listada em trf3.jus.br/pje/acesso-ao-sistema; confirme com scripts\sondar.ps1 -Tribunal trf3
+# Libere o envio real (true/true) so depois de sondar + ensaio OK neste tribunal.
+[app]
+tribunal = "TRF3 - 1o grau"
+base_url = "https://pje1g.trf3.jus.br/pje/login.seam"
+selectors_approved = false
+allow_live_submission = false

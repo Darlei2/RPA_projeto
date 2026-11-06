@@ -44,6 +44,14 @@ def build_parser() -> argparse.ArgumentParser:
     serve.add_argument("--ensaio", action="store_true",
                        help="Entra no PJe real e confere os dados, mas para antes de enviar/assinar")
 
+    probe = sub.add_parser("sondar", help="Abre a tela de login do tribunal e confere os seletores (sem certificado)")
+    probe.add_argument("--config", type=Path, nargs="+", required=True)
+
+    report = sub.add_parser("relatorio", help="Resume os resultados por tribunal e confere a meta de validacao")
+    report.add_argument("--audit-root", type=Path, default=Path("runtime/audit"))
+    report.add_argument("--meta", type=int, default=5, help="Minimo de tribunais com cadastro real")
+    report.add_argument("--json", action="store_true")
+
     inspect = sub.add_parser("inspect-signer", help="Lista os controles das janelas do PJeOffice abertas")
     inspect.add_argument("--config", type=Path, default=Path("config.toml"))
     return parser
@@ -69,6 +77,20 @@ def main(argv: list[str] | None = None) -> int:
             RegistrationServer(args.config, args.audit_root, args.host, args.port,
                                rehearsal=args.ensaio).serve_forever()
             return 0
+        if args.command == "sondar":
+            from .tribunais import sondar
+            failures = 0
+            for path in args.config:
+                result = sondar(load_config(path))
+                result["arquivo"] = str(path)
+                failures += 0 if result.get("ok") else 1
+                print(json.dumps(result, ensure_ascii=False, indent=2))
+            return 0 if not failures else 4
+        if args.command == "relatorio":
+            from .tribunais import format_relatorio, relatorio
+            data = relatorio(args.audit_root, args.meta)
+            print(json.dumps(data, ensure_ascii=False, indent=2) if args.json else format_relatorio(data))
+            return 0 if data["meta"]["atingida"] else 5
         if args.command == "inspect-signer":
             from .signer import dump_signer_windows
             print(dump_signer_windows(load_config(args.config).signer))

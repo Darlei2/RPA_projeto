@@ -1,0 +1,9 @@
+herda = "_comum.toml"
+
+# URL no padrao do PJe-JT (igual ao TRT2); confirme com scripts\sondar.ps1 -Tribunal trt22
+# Libere o envio real (true/true) so depois de sondar + ensaio OK neste tribunal.
+[app]
+tribunal = "TRT22 - 1o grau"
+base_url = "https://pje.trt22.jus.br/primeirograu/login.seam"
+selectors_approved = false
+allow_live_submission = false

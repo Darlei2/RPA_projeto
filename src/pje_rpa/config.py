@@ -14,9 +14,31 @@ class ConfigurationError(ValueError):
     pass
 
 
-def load_config(path: Path) -> AppConfig:
+def _read_toml(path: Path, chain: tuple[Path, ...] = ()) -> dict:
+    """Le o .toml e aplica `herda = "arquivo.toml"` (caminho relativo ao proprio arquivo).
+
+    O arquivo herdado fornece a base; cada secao do arquivo do tribunal sobrescreve
+    somente as chaves que declara (ex.: so `login_certificate_button` em [selectors]).
+    """
+    path = path.resolve()
+    if path in chain:
+        raise ConfigurationError(f"Heranca circular em {path.name}")
     with path.open("rb") as stream:
         raw = tomllib.load(stream)
+    parent = raw.pop("herda", None)
+    if not parent:
+        return raw
+    base = _read_toml(path.parent / str(parent), chain + (path,))
+    for key, value in raw.items():
+        if isinstance(value, dict) and isinstance(base.get(key), dict):
+            base[key] = {**base[key], **value}
+        else:
+            base[key] = value
+    return base
+
+
+def load_config(path: Path) -> AppConfig:
+    raw = _read_toml(path)
 
     app = raw.get("app", {})
     browser = raw.get("browser", {})

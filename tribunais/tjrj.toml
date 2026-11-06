@@ -1,0 +1,9 @@
+herda = "_comum.toml"
+
+# URL oficial do PJe 1o grau do TJRJ; confirme com scripts\sondar.ps1 -Tribunal tjrj
+# Libere o envio real (true/true) so depois de sondar + ensaio OK neste tribunal.
+[app]
+tribunal = "TJRJ - 1o grau"
+base_url = "https://tjrj.pje.jus.br/1g/login.seam"
+selectors_approved = false
+allow_live_submission = false

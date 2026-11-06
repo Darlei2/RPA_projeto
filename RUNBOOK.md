@@ -118,3 +118,22 @@ Resultados possíveis:
 - `BLOCKED`: CAPTCHA, certificado, acesso ou perfil incorreto;
 - `FAILED`: elemento esperado ou requisito técnico não encontrado.
 
+
+## 6. Expandir para novos tribunais
+
+Todos os arquivos de `tribunais\` herdam de `tribunais\_comum.toml` (`herda = "_comum.toml"`).
+Um tribunal novo normalmente precisa so de `[app]` com `tribunal` e `base_url`; sobrescreva em
+`[selectors]` apenas o que for diferente naquele PJe.
+
+Para cada tribunal, nesta ordem:
+
+```powershell
+.\scripts\sondar.ps1 -Tribunal trf6          # abre so o login: URL e botao de certificado ok?
+.\scripts\ensaiar.ps1 -Tribunal trf6         # login real + formulario, para antes de enviar
+# conferido o ensaio: selectors_approved = true e allow_live_submission = true no trf6.toml
+.\scripts\executar-live.ps1 -Tribunal trf6   # cadastro real
+.\scripts\relatorio.ps1                      # melhor resultado por tribunal e situacao da meta
+```
+
+Meta de validacao: cadastro real (`COMPLETED`) em pelo menos 5 tribunais, com 1 TRF, 1 TRT e 1 TJ.
+`ALREADY_REGISTERED` nao conta: escolha tribunais em que o advogado ainda nao tem cadastro.
