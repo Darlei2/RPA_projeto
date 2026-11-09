@@ -1,0 +1,9 @@
+herda = "_comum.toml"
+
+# PJe 1o grau do TJPE (nuvem); confirme com scripts\sondar.ps1 -Tribunal tjpe
+# Libere o envio real (true/true) so depois de sondar + ensaio OK neste tribunal.
+[app]
+tribunal = "TJPE - 1o grau"
+base_url = "https://pje.cloud.tjpe.jus.br/1g/login.seam"
+selectors_approved = false
+allow_live_submission = false
