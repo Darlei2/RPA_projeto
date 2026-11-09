@@ -61,6 +61,11 @@ DEFAULT_SELECTORS: dict[str, list[str]] = {
         "text=verifique seu e-mail",
         "text=verifique o seu e-mail",
         "text=foi enviad",
+        "text=e-mail enviado",
+        "text=email enviado",
+        "text=enviamos",
+        "text=link para redefin",
+        "text=link de redefin",
     ],
     "password_link_proceed": [
         "text=Clique aqui para prosseguir",
@@ -204,3 +209,25 @@ def test_login(browser, config, cpf: str, password: str,
 
 def _url(browser) -> str:
     return getattr(getattr(browser, "page", None), "url", "") or ""
+
+
+def diagnose(browser, shot_path=None) -> dict:
+    """Retrato da tela atual para entender uma falha: titulos, rotulos, botoes,
+    campos (sem valores) e um trecho do texto com os numeros mascarados."""
+    import re
+
+    info: dict = {"url": _url(browser)}
+    try:
+        info.update(browser.outline())
+        text = browser.page.locator("body").inner_text(timeout=2000)
+        info["texto"] = re.sub(r"\d", "*", " ".join(text.split()))[:700]
+    except Exception as exc:  # noqa: BLE001
+        info["erro_diagnostico"] = type(exc).__name__
+    if shot_path is not None:
+        try:
+            browser.page.screenshot(path=str(shot_path), full_page=True)
+            info["print"] = str(shot_path)
+        except Exception:  # noqa: BLE001
+            pass
+    return info
+

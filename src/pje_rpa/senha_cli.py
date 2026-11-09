@@ -10,7 +10,7 @@ import re
 import time
 
 from .audit import AuditLog
-from .credencial import request_password_link, set_password, test_login
+from .credencial import diagnose, request_password_link, set_password, test_login
 from .totp import gerar_totp, normalizar_chave
 
 
@@ -31,6 +31,17 @@ def _code_provider(secret: str):
         print("Codigo TOTP gerado localmente")
         return gerar_totp(secret)
     return provide
+
+
+def _report_failure(browser, audit, step_name: str) -> None:
+    """Mostra o que estava na tela, salva um print local e deixa o Edge aberto para conferir."""
+    import json
+
+    info = diagnose(browser, audit.run_dir / f"falha-{step_name}.png")
+    print("\n--- Tela no momento da falha (numeros mascarados) ---")
+    print(json.dumps(info, ensure_ascii=False, indent=2))
+    print("Print salvo em:", info.get("print", "(nao foi possivel salvar)"))
+    _ask("\nO Edge continua aberto para voce conferir. Pressione Enter para fechar... ")
 
 
 def run_password_wizard(config, audit_root) -> int:
@@ -56,6 +67,7 @@ def run_password_wizard(config, audit_root) -> int:
             print(("OK: " if step.ok else "FALHA: ") + step.detail)
             if not step.ok:
                 reason = step.detail
+                _report_failure(browser, audit, "pedido-link")
                 return 3
 
         link = _ask("\nCole o link recebido no e-mail (Enter vazio = parar aqui): ")
@@ -75,6 +87,7 @@ def run_password_wizard(config, audit_root) -> int:
         print(("OK: " if step.ok else "FALHA: ") + step.detail)
         if not step.ok:
             reason = step.detail
+            _report_failure(browser, audit, "nova-senha")
             return 3
 
         secret = normalizar_chave(getpass.getpass(
@@ -83,6 +96,8 @@ def run_password_wizard(config, audit_root) -> int:
         password = secret = ""
         audit.record("password_login_tested", "CREDENTIAL", {"ok": step.ok})
         print(("OK: " if step.ok else "FALHA: ") + step.detail)
+        if not step.ok:
+            _report_failure(browser, audit, "login-senha")
         status, reason = ("CREDENTIAL_OK" if step.ok else "CREDENTIAL_FAILED"), step.detail
         return 0 if step.ok else 3
     finally:

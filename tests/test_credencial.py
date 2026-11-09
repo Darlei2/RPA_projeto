@@ -75,3 +75,13 @@ def test_pede_link_cadastra_senha_e_testa_login(browser):
 def test_link_fora_do_jus_br_e_recusado(browser):
     step = set_password(browser, browser.config, "https://phishing.example.com/reset", "x")
     assert not step.ok and ".jus.br" in step.detail
+
+
+def test_diagnostico_mascara_numeros(browser, tmp_path):
+    from pje_rpa.credencial import diagnose
+
+    browser.open(HOST + "/reset-credentials")
+    browser.page.evaluate("document.body.insertAdjacentText('beforeend', 'CPF 123.456.789-01')")
+    info = diagnose(browser, tmp_path / "x.png")
+    assert "123" not in info["texto"] and "***.***.***-**" in info["texto"]
+    assert (tmp_path / "x.png").exists()
