@@ -10,10 +10,11 @@ $env:PYTHONPATH = Join-Path $ProjectRoot "src"
 
 # Abre so a tela de login de cada tribunal (nao usa certificado, nao entra no PJe).
 # Sem -Tribunal, sonda todos os arquivos de tribunais\ (menos _comum.toml).
+# @(...) garante uma lista mesmo com um tribunal so (senao o PowerShell passa letra por letra).
 if ($Tribunal.Count -eq 0) {
-    $Configs = Get-ChildItem tribunais -Filter *.toml | Where-Object { $_.Name -ne "_comum.toml" } |
-        ForEach-Object { Join-Path "tribunais" $_.Name }
+    $Configs = @(Get-ChildItem tribunais -Filter *.toml | Where-Object { $_.Name -ne "_comum.toml" } |
+        ForEach-Object { Join-Path "tribunais" $_.Name })
 } else {
-    $Configs = $Tribunal | ForEach-Object { Join-Path "tribunais" ("{0}.toml" -f $_.ToLower()) }
+    $Configs = @($Tribunal | ForEach-Object { Join-Path "tribunais" ("{0}.toml" -f $_.ToLower()) })
 }
-& $Python -m pje_rpa sondar --config @Configs
+& $Python -m pje_rpa sondar --config $Configs
