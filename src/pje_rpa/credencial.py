@@ -32,25 +32,33 @@ DEFAULT_SELECTORS: dict[str, list[str]] = {
         "text=Solicitar nova senha",
         "text=Recuperar senha",
     ],
+    # O SSO do PJe abre "Solicitar nova senha" como janela sobre a tela de login, onde o
+    # formulario de login (#username, "Entrar") continua visivel: os campos e o botao da
+    # recuperacao vem primeiro para o robo nao preencher/clicar no login por engano.
     "reset_cpf": [
+        "css=input#login",
+        "label=CPF/CNPJ",
+        "css=input[name*='cpf' i]",
+        "css=input[id*='cpf' i]",
         "css=#username",
         "css=input[name='username']",
         "label=CPF",
-        "css=input[name*='cpf' i]",
-        "css=input[id*='cpf' i]",
     ],
     "reset_email": [
+        "css=input#email",
         "css=input[type='email']",
+        "label=Email",
         "label=E-mail",
         "css=input[name*='email' i]",
     ],
     "reset_submit": [
+        # Texto exato: o botao que abre a janela ("Solicitar nova senha") nao pode casar.
+        "css=button:text-is('SOLICITAR'), button:text-is('Solicitar')",
+        "css=input[type='submit'][value='SOLICITAR' i], input[type='button'][value='SOLICITAR' i]",
+        "role=button|name=Enviar",
+        "role=button|name=Confirmar",
         "css=#kc-form-buttons input[type='submit']",
         "css=#kc-form-buttons button",
-        "role=button|name=Enviar",
-        "role=button|name=Solicitar",
-        "role=button|name=Confirmar",
-        "css=input[type='submit']",
     ],
     "reset_confirmation": [
         "text=receber um e-mail",

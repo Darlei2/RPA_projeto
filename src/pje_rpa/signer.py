@@ -109,6 +109,8 @@ class PJeOfficeSigner(SignerPort):
         self.site_hosts = {PJE_SSO_HOST, *(h.lower() for h in site_hosts if h)}
         self._jab = _start_jab()
         self._login_complete = None
+        # Alguns PJe assinam o termo sem abrir janela (certificado ja escolhido no login).
+        self._sign_complete = None
 
     def authenticate(self, certificate: "CertificateInfo", password: str) -> None:
         self._handle_dialogs(certificate, purpose="autenticacao")
@@ -126,6 +128,8 @@ class PJeOfficeSigner(SignerPort):
                     return  # janela tratada e fechada pelo PJeOffice
                 if purpose == 'autenticacao' and self._login_complete and self._login_complete():
                     return
+                if purpose == 'assinatura' and self._sign_complete and self._sign_complete():
+                    return
                 time.sleep(0.5)
                 continue
             if (window.title or '').strip().casefold() == 'autorização de site':
@@ -139,10 +143,21 @@ class PJeOfficeSigner(SignerPort):
                 time.sleep(0.3)
             time.sleep(1.0)
         if not handled:
+            titles = self._visible_titles()
             raise SignerError(
                 f"Janela 'Selecao de certificado' do PJeOffice ({purpose}) nao apareceu em "
-                f"{self.config.appear_timeout_s}s. Confira se o PJeOffice esta aberto e a tela desbloqueada."
+                f"{self.config.appear_timeout_s}s. Confira se o PJeOffice esta aberto e a tela desbloqueada. "
+                "Janelas do PJeOffice visiveis: " + (", ".join(titles) if titles else "nenhuma")
             )
+
+    def _visible_titles(self) -> list[str]:
+        try:
+            return [
+                repr(w.title) for w in self._jab.get_windows()
+                if w.title and ctypes.windll.user32.IsWindowVisible(w.hwnd)
+            ]
+        except Exception:  # noqa: BLE001
+            return []
 
     def _find_window(self):
         for window in self._jab.get_windows():

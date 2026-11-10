@@ -245,6 +245,22 @@ class RegistrationServer:
             def _broadcast(event, state):
                 session.emit("log", event=event, state=state)
 
+                if event == "flow_failed":
+                    try:
+                        import json as _json
+
+                        last = audit.path.read_text(encoding="utf-8").splitlines()[-1]
+                        page = _json.loads(last).get("details", {}).get("page") or {}
+                        for label, key in (("TELA", "title"), ("TITULOS", "headings"), ("BOTOES", "buttons")):
+                            value = page.get(key)
+                            if isinstance(value, list):
+                                value = ", ".join(str(v) for v in value[:12])
+                            if value:
+                                session.emit("step", text=f"{label}: {value}")
+                    except Exception:
+                        pass
+                    return
+
                 if event in ("advance_button_located", "advance_button_clicked"):
                     try:
                         import json as _json

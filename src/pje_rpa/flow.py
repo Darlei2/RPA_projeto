@@ -230,8 +230,17 @@ class PJeRegistrationFlow:
         if sign is None or "ambiguous" in sign:
             return self._failed(self._action_problem("assinar o termo", sign))
         self._click_action("sign_term", "sign", sign)
-        self.signer.sign(self.certificate, self._password)
-        self.audit.record("term_signed_via_pjeoffice", self.state.value)
+        self.audit.record("sign_button_clicked", self.state.value, {"text": sign["text"]})
+        if hasattr(self.signer, "_sign_complete"):
+            self.signer._sign_complete = lambda: self.browser.visible("completion", 200)
+        try:
+            self.signer.sign(self.certificate, self._password)
+            self.audit.record("term_signed_via_pjeoffice", self.state.value)
+        except SignerError:
+            # Sem janela do PJeOffice, mas o PJe ja concluiu: a assinatura foi aceita.
+            if not self.browser.visible("completion", 5000):
+                raise
+            self.audit.record("term_signed_without_dialog", self.state.value)
 
         if not self.browser.visible("completion", 15000):
             blocked = self._blocked_reason()
@@ -363,10 +372,12 @@ class PJeRegistrationFlow:
 
     def _failed(self, reason: str) -> RunResult:
         details: dict = {"reason": reason}
-        if self.rehearsal:
-            # No ensaio, registra a estrutura da tela (titulos, rotulos, botoes; nunca valores
-            # digitados) para homologar os seletores da etapa que falhou.
+        # Registra a estrutura da tela (titulos, rotulos, botoes; nunca valores digitados,
+        # numeros e nome mascarados) para entender e homologar a etapa que falhou.
+        try:
             details["page"] = self._scrub(self.browser.outline())
+        except Exception:  # noqa: BLE001
+            pass
         self._transition(FlowState.FAILED, "flow_failed", details)
         return self._result(RunStatus.FAILED, reason)
 

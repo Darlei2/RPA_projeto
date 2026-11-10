@@ -22,6 +22,16 @@ PAGES = {
     "/reset-credentials": """<form action="/login"><input type=hidden name=sent value=1>
       <label for=username>CPF</label><input id=username name=username>
       <div id=kc-form-buttons><input type=submit value=Enviar></div></form>""",
+    "/tjap-login": """<h1>Login</h1>
+      <form action="/otp"><input id=username name=username><input id=password name=password type=password>
+      <input id=kc-login type=submit value=Entrar></form>
+      <input id=kc-pje-office type=button value="CERTIFICADO DIGITAL">
+      <button type=button onclick="document.getElementById('modal').style.display='block'">Solicitar nova senha</button>
+      <div id=modal style="display:none"><h3>Solicitar nova senha</h3>
+        <label for=login>CPF/CNPJ</label><input id=login name=login>
+        <label for=email>Email</label><input id=email name=email type=email>
+        <button type=button onclick="if(login.value&&email.value){msg.textContent='Foi enviado um e-mail com as instrucoes'}">SOLICITAR</button>
+        <p id=msg></p></div>""",
     "/action": """<a href="/update">Clique aqui para prosseguir</a>""",
     "/update": """<form action="/updated"><input id=password-new type=password><input id=password-confirm type=password>
       <div id=kc-form-buttons><input type=submit value=Enviar></div></form>""",
@@ -85,3 +95,12 @@ def test_diagnostico_mascara_numeros(browser, tmp_path):
     info = diagnose(browser, tmp_path / "x.png")
     assert "123" not in info["texto"] and "***.***.***-**" in info["texto"]
     assert (tmp_path / "x.png").exists()
+
+
+def test_janela_de_recuperacao_sobre_o_login_tjap(browser):
+    """No TJAP o pedido de senha abre sobre a tela de login: nao pode usar #username/Entrar."""
+    config = dataclasses.replace(browser.config, base_url=HOST + "/tjap-login")
+    step = request_password_link(browser, config, "123.456.789-01", "adv@exemplo.com.br")
+    assert step.ok, step.detail
+    assert browser.page.input_value("#username") == ""
+    assert browser.page.input_value("#login") == "12345678901"
