@@ -150,19 +150,23 @@ def processar_advogado(config: AppConfig, linha, audit_root: Path, deps: Depende
     record = linha.record
     deps.log(f"\n========== Linha {linha.numero_linha}: {linha.nome} ({config.tribunal}) ==========")
 
-    pfx_password = linha.segredo("senha_certificado") or deps.secret(
-        f"Senha do certificado A1 de {linha.nome}")
-    if not pfx_password:
-        res.cadastro, res.motivo = "PULADO", "senha do certificado nao informada"
-        return res
+    if linha.usa_windows:
+        pfx, pfx_password = None, ""  # certificado ja instalado: sem arquivo e sem senha
+    else:
+        pfx = linha.certificado.read_bytes()
+        pfx_password = linha.segredo("senha_certificado") or deps.secret(
+            f"Senha do certificado A1 de {linha.nome}")
+        if not pfx_password:
+            res.cadastro, res.motivo = "PULADO", "senha do certificado nao informada"
+            return res
     secret_2fa = _chave_2fa(linha, deps)
 
     # 1) Cadastro com o certificado
-    deps.log("1/2 Cadastro com o certificado A1")
-    kwargs = {"rehearsal": rehearsal, "notify": deps.log}
+    deps.log("1/2 Cadastro com o certificado A1" + (" (instalado no Windows)" if linha.usa_windows else " (.pfx)"))
+    kwargs = {"rehearsal": rehearsal, "notify": deps.log, "thumbprint": linha.thumbprint}
     if deps.store_factory:
         kwargs["store"] = deps.store_factory()
-    resultado = deps.cadastrar(config, record, linha.certificado.read_bytes(), pfx_password,
+    resultado = deps.cadastrar(config, record, pfx, pfx_password,
                                _code_provider(secret_2fa, deps), audit_root, **kwargs)
     pfx_password = ""
     res.cadastro, res.motivo = resultado.status, resultado.reason
@@ -240,6 +244,34 @@ def _resumo(resultados: list[ResultadoAdvogado], config: AppConfig, rehearsal: b
     log(f"\nCredenciais prontas (cadastro + senha + login testado): {prontos} de {len(resultados)}")
 
 
+def _conferir_certificados_windows(linhas: list, deps: Dependencias) -> None:
+    """Antes de comecar, acha no Windows o A1 de cada linha sem .pfx (pelo CPF ou thumbprint)."""
+    from .certificate import CertificateError, find_installed
+
+    pendentes = [l for l in linhas if l.ok and l.usa_windows]
+    if not pendentes:
+        return
+    try:
+        if deps.store_factory:
+            store = deps.store_factory()
+        else:
+            from .certificate import WindowsCertificateStore
+            store = WindowsCertificateStore()
+    except CertificateError as exc:
+        for l in pendentes:
+            l.erros.append(f"certificado do Windows indisponivel ({exc}); informe o .pfx")
+        return
+    for l in pendentes:
+        try:
+            info, aviso = find_installed(store, l.record.cpf_esperado, l.thumbprint or None)
+        except CertificateError as exc:
+            l.erros.append(str(exc))
+            continue
+        l.thumbprint = info.thumbprint_sha1  # fixa a escolha para o cadastro usar o mesmo
+        l.certificado_info = (f"Windows, {info.emissor}, valido ate {info.valido_ate:%d/%m/%Y}, "
+                              f"{info.thumbprint_sha1[:8]}..." + (f" ({aviso})" if aviso else ""))
+
+
 # ------------------------------------------------------------- assistente
 def run_executar(audit_root: Path = Path("runtime/audit"), saida: Path = Path("entregas"),
                  tribunal: str = "", planilha: str = "", ensaio: bool | None = None,
@@ -292,6 +324,7 @@ def run_executar(audit_root: Path = Path("runtime/audit"), saida: Path = Path("e
         resposta = deps.ask(f"Planilha dos advogados [{PLANILHA_PADRAO}]: ").strip().strip('"')
         caminho = Path(resposta) if resposta else PLANILHA_PADRAO
     linhas = ler_planilha(caminho, password_provider=lambda: deps.secret("Senha para abrir a planilha de advogados"))
+    _conferir_certificados_windows(linhas, deps)
     validas = [l for l in linhas if l.ok]
     invalidas = [l for l in linhas if not l.ok]
     log(f"\nPlanilha: {caminho}  -> {len(validas)} advogado(s) pronto(s), {len(invalidas)} com erro")
@@ -301,7 +334,8 @@ def run_executar(audit_root: Path = Path("runtime/audit"), saida: Path = Path("e
         log("Nada para executar.")
         return 2
     for l in validas:
-        log(f"  linha {l.numero_linha}: {l.nome}  (OAB {l.record.oab_numero}/{l.record.oab_uf})")
+        origem = l.certificado_info if l.usa_windows else f"arquivo {l.certificado.name}"
+        log(f"  linha {l.numero_linha}: {l.nome}  (OAB {l.record.oab_numero}/{l.record.oab_uf})  certificado: {origem}")
 
     # 4) Opcoes e confirmacao
     nova_senha = False

@@ -45,7 +45,10 @@ COLUNAS: dict[str, tuple[str, ...]] = {
     "executar": ("executar", "processar", "ativo"),
 }
 OBRIGATORIAS = ("nome", "cpf", "oab_numero", "oab_uf", "email", "telefone", "cep",
-                "logradouro", "numero", "bairro", "cidade", "uf", "certificado")
+                "logradouro", "numero", "bairro", "cidade", "uf")
+# Coluna "certificado": vazia ou "windows" = A1 ja instalado no Windows, achado pelo CPF da linha;
+# 40 caracteres hexadecimais = thumbprint de um certificado instalado; outro texto = caminho do .pfx.
+_THUMBPRINT = re.compile(r"^[0-9A-Fa-f]{40}$")
 SENSIVEIS = ("senha_certificado", "chave_2fa", "imap_senha")
 
 
@@ -63,8 +66,14 @@ class LinhaAdvogado:
     numero_linha: int                 # linha na planilha (cabecalho = 1)
     dados: dict[str, str]
     record: LawyerRecord | None = None
-    certificado: Path | None = None
+    certificado: Path | None = None   # arquivo .pfx; None = certificado instalado no Windows
+    thumbprint: str = ""              # escolhido na planilha (opcional) ou conferido antes de rodar
+    certificado_info: str = ""        # resumo do certificado do Windows que sera usado
     erros: list[str] = field(default_factory=list)
+
+    @property
+    def usa_windows(self) -> bool:
+        return self.certificado is None
 
     @property
     def ok(self) -> bool:
@@ -167,8 +176,11 @@ def _validar(numero_linha: int, dados: dict[str, str], base: Path) -> LinhaAdvog
     except ConfigurationError as exc:
         linha.erros.extend(str(exc).split("; "))
     raw = dados.get("certificado", "").strip().strip('"')
-    if not raw:
-        linha.erros.append("certificado (caminho do .pfx) vazio")
+    compact = raw.replace(" ", "")
+    if not raw or raw.casefold() in ("windows", "instalado", "repositorio"):
+        pass  # usa o certificado instalado no Windows com o CPF da linha
+    elif _THUMBPRINT.match(compact):
+        linha.thumbprint = compact.upper()
     else:
         pfx = Path(raw)
         pfx = pfx if pfx.is_absolute() else (base / pfx)
@@ -189,7 +201,7 @@ def gravar_modelo(destino: Path) -> Path:
                  "senha_certificado", "chave_2fa", "imap_servidor", "imap_usuario", "imap_senha", "executar"]
     exemplo = ["ADVOGADO DE TESTE", "52998224725", "12345", "BA", "advogado@exemplo.com.br", "71999999999",
                "40000000", "RUA DE TESTE", "100", "", "CENTRO", "SALVADOR", "BA", "CONTRATO-123",
-               r"C:\certificados\advogado.pfx", "", "", "imap.gmail.com", "", "", "N"]
+               "", "", "", "imap.gmail.com", "", "", "N"]
     wb = Workbook()
     ws = wb.active
     ws.title = "Advogados"
@@ -207,10 +219,12 @@ def gravar_modelo(destino: Path) -> Path:
     notas = wb.create_sheet("Instrucoes")
     for texto in (
         "Uma linha por advogado. A linha de exemplo esta com executar = N (sera ignorada).",
-        "Obrigatorias: nome, cpf, oab_numero, oab_uf, email, telefone, cep, logradouro, numero, bairro, cidade, uf, certificado.",
+        "Obrigatorias: nome, cpf, oab_numero, oab_uf, email, telefone, cep, logradouro, numero, bairro, cidade, uf.",
         "autorizacao_ref: referencia do documento em que o advogado autoriza o uso do A1 (obrigatoria no modo real).",
-        "certificado: caminho do arquivo .pfx (absoluto ou relativo a pasta da planilha).",
-        "senha_certificado, chave_2fa, imap_senha: OPCIONAIS. Vazias = o robo pergunta na hora (recomendado).",
+        "certificado: VAZIO = usa o A1 ja instalado no Windows com o CPF da linha (sem .pfx e sem senha).",
+        "certificado: thumbprint (40 letras/numeros) = usa aquele certificado instalado no Windows.",
+        "certificado: caminho do .pfx (ex.: C:\\certificados\\fulano.pfx) = instala so durante a execucao e remove no fim.",
+        "senha_certificado: so para .pfx. chave_2fa, imap_senha: OPCIONAIS. Vazias = o robo pergunta na hora (recomendado).",
         "Se preencher colunas de senha, proteja o arquivo com senha no Excel (Arquivo > Informacoes > Proteger).",
         "imap_servidor/imap_usuario: caixa onde chega o link de senha do PJe (vazio = deduz pelo e-mail).",
         "executar: N para pular a linha.",

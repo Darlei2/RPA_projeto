@@ -168,8 +168,12 @@ cadastro com o A1 -> termo assinado -> "Solicitar nova senha" -> link do e-mail 
 
 - Tribunal sem envio real liberado no `.toml` roda so em ENSAIO.
 - Colunas obrigatorias: nome, cpf, oab_numero, oab_uf, email, telefone, cep, logradouro, numero,
-  bairro, cidade, uf, certificado (caminho do .pfx). `autorizacao_ref` e obrigatoria no modo real.
-- Opcionais e sensiveis: senha_certificado, chave_2fa, imap_senha. Vazias = o robo pergunta na hora.
+  bairro, cidade, uf. `autorizacao_ref` e obrigatoria no modo real.
+- Coluna `certificado`: **vazia** = usa o A1 ja instalado no Windows (Cert:\CurrentUser\My) com o
+  CPF da linha, sem .pfx e sem senha (havendo renovacao, o de validade mais longa); **thumbprint**
+  (40 caracteres) = aquele certificado instalado; **caminho do .pfx** = instala so durante a execucao.
+  Antes de comecar, o robo mostra qual certificado vai usar em cada linha.
+- Opcionais e sensiveis: senha_certificado (so para .pfx), chave_2fa, imap_senha. Vazias = o robo pergunta na hora.
   Se preencher, proteja a planilha com senha no Excel; a pasta `planilhas\` nao vai para o Git.
 - `executar = N` pula a linha. Um advogado com erro nao para o lote.
 - Advogado ja cadastrado no tribunal: a senha so e trocada se o operador confirmar no inicio.

@@ -52,7 +52,11 @@ def read_pfx(data: bytes, password: str) -> CertificateInfo:
         raise CertificateError("Senha incorreta ou arquivo nao e um certificado A1 (.pfx/.p12)") from exc
     if cert is None or key is None:
         raise CertificateError("O arquivo nao contem certificado e chave privada")
+    return info_from_x509(cert)
 
+
+def info_from_x509(cert: x509.Certificate) -> CertificateInfo:
+    """Nome, CPF, emissor, validade e thumbprint de um certificado ICP-Brasil de pessoa fisica."""
     now = datetime.now(timezone.utc)
     not_after = cert.not_valid_after_utc
     if not_after < now:
@@ -214,6 +218,21 @@ class WindowsCertificateStore:
     def remove(self, thumbprint: str) -> None:
         self._run(_REMOVE_PS, thumbprint + "\n")
 
+    def list_installed(self) -> list["InstalledCertificate"]:
+        """Certificados do repositorio Pessoal do usuario (so a parte publica + se ha chave)."""
+        out = self._run(_LIST_PS, "\n")
+        found = []
+        for line in out.splitlines():
+            parts = line.strip().split("|")
+            if len(parts) != 3:
+                continue
+            try:
+                der = base64.b64decode(parts[0])
+            except ValueError:
+                continue
+            found.append(InstalledCertificate(der, parts[1].strip().lower() == "true", parts[2].strip()))
+        return found
+
     def contains(self, thumbprint: str) -> bool:
         out = self._run("$t = [Console]::In.ReadLine().Trim(); Test-Path \"Cert:\\CurrentUser\\My\\$t\"", thumbprint + "\n")
         return out.strip().lower().endswith("true")
@@ -230,6 +249,66 @@ class WindowsCertificateStore:
             # stderr do PowerShell nao contem a senha (ela so trafega pelo stdin)
             raise CertificateError(f"Falha no repositorio de certificados: {completed.stderr.strip()[:300]}")
         return completed.stdout
+
+
+_LIST_PS = r"""
+Get-ChildItem Cert:\CurrentUser\My | ForEach-Object {
+  $provider = ""
+  if ($_.HasPrivateKey) {
+    try { $provider = $_.PrivateKey.CspKeyContainerInfo.ProviderName } catch { $provider = "CNG" }
+    if (-not $provider) { $provider = "CNG" }
+  }
+  "{0}|{1}|{2}" -f [Convert]::ToBase64String($_.RawData), $_.HasPrivateKey, $provider
+}
+"""
+
+
+@dataclass(frozen=True)
+class InstalledCertificate:
+    der: bytes
+    has_private_key: bool
+    provider: str = ""
+
+
+def find_installed(store, cpf: str, thumbprint: str | None = None) -> tuple[CertificateInfo, str]:
+    """Escolhe, no repositorio do Windows, o A1 do CPF da linha da planilha.
+
+    Com thumbprint: exatamente aquele certificado (e ele precisa ser do CPF). Sem thumbprint:
+    os certificados validos do CPF com chave privada; havendo mais de um (renovacao), o de
+    validade mais longa. Devolve (info, aviso) - o aviso explica a escolha ou um risco.
+    """
+    cpf = "".join(ch for ch in cpf if ch.isdigit())
+    wanted = (thumbprint or "").replace(" ", "").upper()
+    candidates: list[tuple[CertificateInfo, InstalledCertificate]] = []
+    for item in store.list_installed():
+        try:
+            info = info_from_x509(x509.load_der_x509_certificate(item.der))
+        except (CertificateError, ValueError):
+            continue  # vencido, sem CPF, de outro tipo...
+        if wanted and info.thumbprint_sha1 != wanted:
+            continue
+        if info.cpf != cpf:
+            if wanted:
+                raise CertificateError("O certificado indicado na planilha e de outro CPF")
+            continue
+        if not item.has_private_key:
+            if wanted:
+                raise CertificateError("O certificado indicado esta no Windows sem a chave privada")
+            continue
+        candidates.append((info, item))
+    if not candidates:
+        what = f"thumbprint {wanted[:8]}..." if wanted else "este CPF"
+        raise CertificateError(
+            f"Nenhum certificado valido com chave privada para {what} no Windows "
+            "(Cert:\\CurrentUser\\My). Informe o arquivo .pfx na coluna 'certificado'.")
+    candidates.sort(key=lambda pair: pair[0].valido_ate, reverse=True)
+    info, item = candidates[0]
+    notes = []
+    if len(candidates) > 1:
+        notes.append(f"{len(candidates)} certificados deste CPF no Windows; usado o de validade mais longa")
+    if item.provider in ("", "CNG") or "key storage" in item.provider.lower():
+        notes.append("chave em armazenamento CNG: o login pelo PJeOffice pode falhar (MD5WITHRSA)")
+    return info, "; ".join(notes)
 
 
 class SimulatedCertificateStore:

@@ -58,12 +58,16 @@ def limpar_pendentes(audit_root: Path, store, notify: Notify = print) -> None:
     _set_pending(audit_root, remaining)
 
 
-def cadastrar(config: AppConfig, record: LawyerRecord, pfx: bytes, pfx_password: str,
+def cadastrar(config: AppConfig, record: LawyerRecord, pfx: bytes | None, pfx_password: str,
               code_provider: Callable[[str], str | None], audit_root: Path, *,
-              rehearsal: bool = False, notify: Notify = print,
+              rehearsal: bool = False, notify: Notify = print, thumbprint: str = "",
               store=None, browser_factory=None, signer_factory=None) -> ResultadoCadastro:
-    """Roda o cadastro com o A1. Nao pede senha do PJe: isso e feito depois (credencial)."""
-    from .certificate import CertificateError, read_pfx
+    """Roda o cadastro com o A1. Nao pede senha do PJe: isso e feito depois (credencial).
+
+    pfx = None: usa o certificado ja instalado no Windows com o CPF do advogado (ou o
+    `thumbprint` indicado), sem instalar nem remover nada e sem senha do certificado.
+    """
+    from .certificate import CertificateError, find_installed, read_pfx
     from .config import ConfigurationError
     from .flow import PJeRegistrationFlow
 
@@ -79,12 +83,23 @@ def cadastrar(config: AppConfig, record: LawyerRecord, pfx: bytes, pfx_password:
         def signer_factory(cfg):
             return PJeOfficeSigner(cfg.signer, site_hosts=(urlparse(cfg.base_url).hostname or "",))
 
-    thumbprint = None
+    chosen_thumbprint = thumbprint
+    thumbprint = None  # daqui em diante: o que ESTA execucao instalou e precisa remover
     browser = None
     try:
-        info = read_pfx(pfx, pfx_password)
+        if pfx is None:
+            info, aviso = find_installed(store, record.cpf_esperado, chosen_thumbprint or None)
+            notify(f"Usando o certificado instalado no Windows: emissor {info.emissor}, "
+                   f"valido ate {info.valido_ate:%d/%m/%Y}, thumbprint {info.thumbprint_sha1[:8]}...")
+            if aviso:
+                notify("  aviso: " + aviso)
+            pfx_password = ""
+        else:
+            info = read_pfx(pfx, pfx_password)
         (assert_rehearsal_ready if rehearsal else assert_live_ready)(config, record)
-        if store.contains(info.thumbprint_sha1):
+        if pfx is None:
+            pass  # ja esta no repositorio: nao instala nem remove
+        elif store.contains(info.thumbprint_sha1):
             notify("Certificado ja estava no repositorio do Windows; sera mantido")
         else:
             notify("Instalando o certificado no repositorio do Windows")
