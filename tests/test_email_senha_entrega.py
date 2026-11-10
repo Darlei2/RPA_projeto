@@ -167,6 +167,7 @@ def test_assistente_completo_gera_senha_e_planilha(tmp_path, monkeypatch):
     monkeypatch.setattr(senha_cli, "set_password", lambda b, c, l, p, f=None: fake_set(b, c, l, p))
     monkeypatch.setattr(senha_cli, "test_login", lambda *a: StepResult(True, "login ok"))
     monkeypatch.setattr(senha_cli, "_setup_inbox", lambda email: FakeInbox())
+    monkeypatch.setattr(senha_cli, "_clipboard_text", lambda: "")  # nao ler a area de transferencia real
     answers = iter(["Fulano de Tal", "012.345.678-90", "adv@gmail.com", "", ""])
     monkeypatch.setattr(builtins, "input", lambda prompt="": next(answers))
     secrets_ = iter(["", "planilha", "planilha"])
