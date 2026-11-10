@@ -1,0 +1,9 @@
+herda = "_comum.toml"
+
+# TREMG-PJE-JUSBR-1G: PJe das zonas eleitorais de MG (servidor do TSE), login pelo SSO Jus.br.
+# URL no padrao do PJe-ZE (TRE-SP usa pje1g-sp.tse.jus.br); confirme com scripts\sondar.ps1 -Tribunal tremg
+[app]
+tribunal = "TRE-MG - 1o grau"
+base_url = "https://pje1g-mg.tse.jus.br/pje/login.seam"
+selectors_approved = false
+allow_live_submission = false
