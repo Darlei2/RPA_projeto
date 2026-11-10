@@ -14,7 +14,7 @@ import getpass
 import os
 import re
 import time
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from .audit import AuditLog
@@ -47,6 +47,71 @@ def _code_provider(secret: str):
     return provide
 
 
+def _clipboard_text() -> str:
+    """Le o texto da area de transferencia do Windows (ctypes; fallback: Get-Clipboard)."""
+    try:
+        import ctypes
+        from ctypes import wintypes
+
+        user32 = ctypes.WinDLL("user32")
+        kernel32 = ctypes.WinDLL("kernel32")
+        user32.GetClipboardData.restype = wintypes.HANDLE
+        kernel32.GlobalLock.restype = wintypes.LPVOID
+        kernel32.GlobalLock.argtypes = [wintypes.HGLOBAL]
+        kernel32.GlobalUnlock.argtypes = [wintypes.HGLOBAL]
+        if user32.OpenClipboard(None):
+            try:
+                handle = user32.GetClipboardData(13)  # CF_UNICODETEXT
+                if handle:
+                    pointer = kernel32.GlobalLock(handle)
+                    try:
+                        return ctypes.wstring_at(pointer) if pointer else ""
+                    finally:
+                        kernel32.GlobalUnlock(handle)
+            finally:
+                user32.CloseClipboard()
+    except Exception:  # noqa: BLE001
+        pass
+    try:
+        import subprocess
+
+        out = subprocess.run(["powershell", "-NoProfile", "-Command", "Get-Clipboard -Raw"],
+                             capture_output=True, text=True, timeout=10)
+        return out.stdout or ""
+    except Exception:  # noqa: BLE001
+        return ""
+
+
+def _clear_clipboard() -> None:
+    try:
+        import ctypes
+
+        user32 = ctypes.WinDLL("user32")
+        if user32.OpenClipboard(None):
+            user32.EmptyClipboard()
+            user32.CloseClipboard()
+    except Exception:  # noqa: BLE001
+        pass
+
+
+def _secret(prompt: str, allow_empty: bool = False) -> str:
+    """Segredo sem eco. No console do Windows, colar num campo oculto nao funciona: o operador
+    copia o valor e aperta Enter (campo vazio) e ele e lido da area de transferencia."""
+    typed = getpass.getpass(prompt + "\n  -> COPIE o valor e aperte Enter aqui (ou digite e Enter): ")
+    typed = "".join(ch for ch in typed if ch.isprintable()).strip()
+    if len(typed) >= 4:
+        return typed
+    value = _clipboard_text().strip()
+    if value:
+        size = len(re.sub(r"\s", "", value))
+        print(f"  lido da area de transferencia: {size} caracteres (sem espacos)")
+        _clear_clipboard()
+        return value
+    if not allow_empty:
+        print("  area de transferencia vazia")
+    return ""
+
+
 def _report_failure(browser, audit, step_name: str) -> None:
     """Mostra o que estava na tela, salva um print local e deixa o Edge aberto para conferir."""
     import json
@@ -68,28 +133,90 @@ def _setup_inbox(email_address: str):
     host = _ask(f"Servidor IMAP [{host}]: ") or host if host else _ask("Servidor IMAP (ex.: imap.gmail.com): ")
     user = os.environ.get("PJE_RPA_IMAP_USER") or email_address
     user = _ask(f"Usuario da caixa [{user}]: ") or user
-    secret = os.environ.get("PJE_RPA_IMAP_SENHA") or getpass.getpass(
-        "Senha de app da caixa (nao aparece na tela; Gmail: myaccount.google.com/apppasswords): ")
-    inbox = ImapInbox(host=host, user=user, password=secret.replace(" ", ""))
-    try:
-        inbox.check_login()
-    except Exception as exc:  # noqa: BLE001
-        print(f"FALHA ao entrar na caixa de e-mail ({type(exc).__name__}). O link sera colado manualmente.")
-        return None
-    print("OK: caixa de e-mail acessada")
-    return inbox
+    env_secret = os.environ.get("PJE_RPA_IMAP_SENHA")
+    for attempt in range(1, 4):
+        secret = env_secret if (env_secret and attempt == 1) else _secret(
+            "Senha de app da caixa de e-mail (16 letras; Gmail: myaccount.google.com/apppasswords)")
+        secret = re.sub(r"\s", "", secret or "")
+        if not secret:
+            break
+        inbox = ImapInbox(host=host, user=user, password=secret)
+        try:
+            inbox.check_login()
+            print("OK: caixa de e-mail acessada")
+            return inbox
+        except Exception as exc:  # noqa: BLE001
+            print(f"FALHA ao entrar na caixa de e-mail: {_imap_reason(exc, len(secret))}")
+        if attempt < 3 and not _yes("Tentar a senha de app de novo?", default=True):
+            break
+    print("O link sera colado manualmente.")
+    return None
 
 
-def _get_link(inbox, since: datetime) -> tuple[str, bool]:
+def _imap_reason(exc: Exception, size: int) -> str:
+    """Explica a recusa do servidor sem mostrar a senha (o servidor nunca a ecoa)."""
+    text = str(exc.args[0] if exc.args else exc)
+    if isinstance(exc.args[0] if exc.args else None, bytes):
+        text = exc.args[0].decode(errors="replace")
+    hint = ""
+    if "AUTHENTICATIONFAILED" in text.upper() or "INVALID CREDENTIALS" in text.upper():
+        hint = " -> senha recusada: use a senha de app (16 letras), nao a senha normal do Gmail"
+        if size != 16:
+            hint += f"; voce colou {size} caracteres (esperado 16: colou mais de uma vez?)"
+    elif "APPLICATION-SPECIFIC" in text.upper():
+        hint = " -> o Gmail exige senha de app (ative a verificacao em 2 etapas e gere em apppasswords)"
+    elif isinstance(exc, OSError):
+        hint = " -> sem conexao com o servidor IMAP (rede/firewall da VM?)"
+    return f"{type(exc).__name__}: {text[:150]}{hint}"
+
+
+def _clean_2fa_key(raw: str) -> str:
+    """Aceita a chave pura (com espacos, hifens ou '=' no fim) ou o link otpauth:// do QR code."""
+    from urllib.parse import parse_qs, unquote, urlparse
+
+    raw = (raw or "").strip()
+    if raw.lower().startswith("otpauth://"):
+        raw = (parse_qs(urlparse(raw).query).get("secret") or [""])[0]
+    return re.sub(r"[\s=-]+", "", unquote(raw)).upper()
+
+
+def _ask_2fa_key() -> str:
+    for _ in range(3):
+        if not _yes("Voce tem a CHAVE do 2FA do PJe (Base32) para o robo gerar os codigos?", default=True):
+            return ""
+        raw = _secret("Chave do 2FA do PJe em Base32 (letras A-Z e numeros 2-7)", allow_empty=True)
+        key = _clean_2fa_key(raw)
+        if not key:
+            return ""
+        try:
+            return normalizar_chave(key)
+        except ValueError:
+            if key.isdigit() and len(key) in (6, 8):
+                print("Isso parece o CODIGO de 6 digitos, nao a CHAVE. Aperte Enter vazio para digitar o codigo na hora.")
+            else:
+                bad = sorted({c for c in key if c not in "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567"})
+                why = f"tem caracteres que nao existem em Base32 ({len(bad)} tipo(s), ex.: 0, 1, 8, 9 ou simbolos)" if bad else "formato invalido"
+                print(f"Chave recusada: {len(key)} caracteres, {why}. Colou mais de uma vez? Tente de novo.")
+    print("Seguindo sem a chave: o codigo do 2FA sera pedido na hora.")
+    return ""
+
+
+def _get_link(inbox, since: datetime, known: frozenset[str] = frozenset()) -> tuple[str, bool]:
     if inbox is not None:
-        print(f"Aguardando o e-mail do PJe (ate {LINK_TIMEOUT_S // 60} min)...")
+        print(f"Procurando o e-mail do PJe na caixa (ate {LINK_TIMEOUT_S // 60} min)...")
         link = inbox.wait_for_password_link(
-            since, LINK_TIMEOUT_S, on_wait=lambda left: print(f"  ainda nao chegou ({left}s restantes)"))
+            since, LINK_TIMEOUT_S, on_wait=lambda left: print(f"  ainda nao chegou ({left}s restantes)"),
+            exclude=known)
         if link:
             print("OK: link de senha encontrado no e-mail")
             return link, True
         print("O e-mail nao chegou no prazo (confira tambem o spam).")
     return _ask("Cole o link recebido no e-mail (Enter vazio = pular este tribunal): "), False
+
+
+def _passwords() -> tuple[str, str]:
+    """Primeiro so letras e numeros (20, aceita ate pelo TJAP); reserva com simbolos (16)."""
+    return gerar_senha(20, especiais=False), gerar_senha(16)
 
 
 def _one_tribunal(config, audit_root: Path, lawyer: dict, inbox, secret_2fa: str) -> LinhaCredencial:
@@ -103,27 +230,38 @@ def _one_tribunal(config, audit_root: Path, lawyer: dict, inbox, secret_2fa: str
     browser = PlaywrightBrowser(config)
     status = "CREDENTIAL_FAILED"
     try:
+        # Sempre pede um link novo: links de pedidos anteriores sao invalidados pelo PJe.
+        known = frozenset()
+        if inbox is not None:
+            try:
+                known = inbox.known_links()  # o link novo tem de ser diferente dos que ja estao na caixa
+            except Exception as exc:  # noqa: BLE001
+                print(f"  aviso: nao foi possivel ler a caixa antes do pedido ({type(exc).__name__})")
         since = datetime.now(timezone.utc)
-        step = request_password_link(browser, config, lawyer["cpf"], lawyer["email"])
-        audit.record("password_link_requested" if step.ok else "password_link_request_failed",
-                     "CREDENTIAL", {"ok": step.ok})
-        print(("OK: " if step.ok else "FALHA: ") + step.detail)
-        if not step.ok:
-            linha.observacao = step.detail
+        requested = request_password_link(browser, config, lawyer["cpf"], lawyer["email"])
+        audit.record("password_link_requested" if requested.ok else "password_link_request_failed",
+                     "CREDENTIAL", {"ok": requested.ok})
+        print(("OK: " if requested.ok else "FALHA: ") + requested.detail)
+        if not requested.ok:
+            linha.observacao = requested.detail
             _report_failure(browser, audit, "pedido-link")
             return linha
-
-        link, from_inbox = _get_link(inbox, since)
+        link, from_inbox = _get_link(inbox, since, known)
         audit.record("password_link_obtained", "CREDENTIAL", {"ok": bool(link), "from_inbox": from_inbox})
         if not link:
             linha.observacao = "Link de senha nao recebido"
             return linha
-
-        password = gerar_senha()
-        step = set_password(browser, config, link, password)
+        step = set_password(browser, config, link, *_passwords())
         link = ""
-        audit.record("password_set" if step.ok else "password_set_failed", "CREDENTIAL", {"ok": step.ok})
+
+        password = step.value
+        audit.record("password_set" if step.ok else "password_set_failed", "CREDENTIAL",
+                     {"ok": step.ok, "uncertain": step.uncertain})
         print(("OK: " if step.ok else "FALHA: ") + step.detail)
+        if step.uncertain:
+            # Pode ter sido gravada: vai para a planilha marcada para conferencia, nunca se perde.
+            linha.senha, linha.senha_incerta = password, True
+            print("A senha tentada vai para a planilha marcada como 'Incerto: conferir'.")
         if not step.ok:
             linha.observacao = step.detail
             _report_failure(browser, audit, "nova-senha")
@@ -149,7 +287,7 @@ def _one_tribunal(config, audit_root: Path, lawyer: dict, inbox, secret_2fa: str
 
 
 def _deliver(linhas: list[LinhaCredencial], output_dir: Path) -> None:
-    if not any(l.senha_cadastrada for l in linhas):
+    if not any(l.senha_cadastrada or l.senha_incerta for l in linhas):
         print("\nNenhuma senha foi cadastrada; nada para entregar.")
         return
     destino = output_dir / f"credenciais-{datetime.now():%Y%m%d-%H%M%S}.xlsx"
@@ -168,7 +306,7 @@ def _deliver(linhas: list[LinhaCredencial], output_dir: Path) -> None:
         print("Instale com: .venv\\Scripts\\python.exe -m pip install openpyxl msoffcrypto-tool")
         print("Anote agora as credenciais abaixo (nao serao mostradas de novo):")
         for l in linhas:
-            if l.senha_cadastrada:
+            if l.senha_cadastrada or l.senha_incerta:
                 print(f"  {l.tribunal} | {l.url_login} | {l.advogado} | CPF {l.cpf} | senha: {l.senha}")
     finally:
         for l in linhas:
@@ -185,10 +323,8 @@ def run_password_wizard(configs, audit_root: Path, output_dir: Path = Path("entr
         return 2
     email_address = _ask("E-mail cadastrado no PJe: ")
     inbox = _setup_inbox(email_address)
-    raw_2fa = getpass.getpass("Chave do 2FA em Base32 (Enter vazio = digitar o codigo na hora): ")
-    secret_2fa = normalizar_chave(raw_2fa or None)
-    lawyer = {"nome": nome, "cpf": cpf, "email": email_address,
-              "chave_2fa_exibir": (raw_2fa or "").replace(" ", "").upper()}
+    secret_2fa = _ask_2fa_key()
+    lawyer = {"nome": nome, "cpf": cpf, "email": email_address, "chave_2fa_exibir": secret_2fa}
     if lawyer["chave_2fa_exibir"] and not _yes("Incluir a chave do 2FA na planilha (o analista precisa dela para logar)?",
                                                default=True):
         lawyer["chave_2fa_exibir"] = ""

@@ -12,13 +12,17 @@ DIGITS = "23456789"
 SPECIAL = "@#$%&*!?-_"
 
 
-def gerar_senha(tamanho: int = 16) -> str:
-    """Pelo menos 2 de cada classe (maiuscula, minuscula, numero, especial); comeca por letra."""
+def gerar_senha(tamanho: int = 16, especiais: bool = True) -> str:
+    """Pelo menos 2 de cada classe (maiuscula, minuscula, numero e, se pedido, especial).
+
+    Sem especiais (ex.: o TJAP aceita so letras e numeros) use 20 caracteres: continua forte.
+    """
     if tamanho < 12:
         raise ValueError("Use pelo menos 12 caracteres")
+    groups = (UPPER, LOWER, DIGITS, SPECIAL) if especiais else (UPPER, LOWER, DIGITS)
     rng = secrets.SystemRandom()
-    chars = [rng.choice(group) for group in (UPPER, LOWER, DIGITS, SPECIAL) for _ in range(2)]
-    pool = UPPER + LOWER + DIGITS + SPECIAL
+    chars = [rng.choice(group) for group in groups for _ in range(2)]
+    pool = "".join(groups)
     chars += [rng.choice(pool) for _ in range(tamanho - len(chars))]
     rng.shuffle(chars)
     if not chars[0].isalpha():

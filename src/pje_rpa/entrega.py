@@ -27,6 +27,7 @@ class LinhaCredencial:
     senha: str = ""
     chave_2fa: str = ""
     senha_cadastrada: bool = False
+    senha_incerta: bool = False  # o PJe pode ter gravado: entregar para o analista conferir
     login_testado: bool = False
     quando: datetime = field(default_factory=datetime.now)
     observacao: str = ""
@@ -34,8 +35,8 @@ class LinhaCredencial:
     def valores(self) -> list:
         return [
             self.tribunal, self.url_login, self.advogado, self.cpf, self.email,
-            self.senha if self.senha_cadastrada else "", self.chave_2fa,
-            "Sim" if self.senha_cadastrada else "Nao", "OK" if self.login_testado else "Falhou",
+            self.senha if (self.senha_cadastrada or self.senha_incerta) else "", self.chave_2fa,
+            "Sim" if self.senha_cadastrada else ("Incerto: conferir" if self.senha_incerta else "Nao"), "OK" if self.login_testado else "Falhou",
             self.quando.strftime("%d/%m/%Y %H:%M"), self.observacao,
         ]
 

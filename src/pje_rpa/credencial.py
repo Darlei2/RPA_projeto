@@ -15,6 +15,8 @@ Nenhuma senha, link ou chave e gravada em disco ou na auditoria.
 """
 from __future__ import annotations
 
+import re
+
 import time
 from dataclasses import dataclass
 from typing import Callable
@@ -84,25 +86,37 @@ DEFAULT_SELECTORS: dict[str, list[str]] = {
         "text=clique aqui para continuar",
         "text=Click here to proceed",
     ],
-    "new_password": ["css=#password-new", "css=input[name='password-new']", "label=Nova senha"],
+    # SSO (Keycloak) e pagina propria do PJe (ex.: TJAP /Senha/ativacaoSenha.seam, JSF).
+    "new_password": [
+        "css=#password-new", "css=input[name='password-new']",
+        "css=input[type='password'][id$=':senha']", "label=Digite a senha", "label=Nova senha",
+    ],
     "confirm_password": [
         "css=#password-confirm",
         "css=input[name='password-confirm']",
+        "css=input[type='password'][id$=':confirmacao']",
+        "label=Digite-a novamente",
         "label=Confirme a senha",
         "label=Confirmar senha",
     ],
     "password_submit": [
+        "css=input[type='submit'][id$=':cadastrarSenhaButton']",
         "css=#kc-form-buttons input[type='submit']",
         "css=#kc-form-buttons button",
         "role=button|name=Enviar",
         "role=button|name=Salvar",
         "role=button|name=Confirmar",
+        "role=button|name=Cadastrar",
     ],
     "password_done": [
         "text=conta foi atualizada",
         "text=senha foi alterada",
         "text=senha foi atualizada",
         "text=senha cadastrada",
+        "text=senha foi cadastrada",
+        "text=cadastrada com sucesso",
+        "text=ativado com sucesso",
+        "text=ativada com sucesso",
         "text=Your account has been updated",
     ],
     "login_username": ["css=#username", "css=input[name='username']", "label=CPF"],
@@ -121,6 +135,12 @@ def ensure_selectors(config) -> None:
 class StepResult:
     ok: bool
     detail: str
+    value: str = ""  # ex.: a senha efetivamente aceita (nunca vai para log/auditoria)
+    expired: bool = False  # link vencido/usado: pedir outro
+    uncertain: bool = False  # o PJe pode ter gravado a senha em value
+
+
+_REJECTED = re.compile(r"erro|inv[a\u00e1]lid|n[a\u00e3]o (confere|atende|permit|aceit)|deve|obrigat|m[i\u00ed]nim|m[a\u00e1]xim|caracter", re.I)
 
 
 def _messages(browser) -> list[str]:
@@ -161,17 +181,36 @@ def request_password_link(browser, config, cpf: str, email: str) -> StepResult:
         cpf_group, email_group = "reset_cpf", "reset_email"
     else:
         return _fail(browser, "Campo de CPF da recuperacao de senha nao localizado")
-    browser.fill(cpf_group, "".join(ch for ch in cpf if ch.isdigit()))
+    cpf_digits = "".join(ch for ch in cpf if ch.isdigit())
+    browser.fill(cpf_group, cpf_digits)
     if email and browser.visible(email_group, 1500):
         browser.fill(email_group, email.strip())
+    # Garante que os dados foram para os campos certos antes de enviar (sem mostrar os valores).
+    try:
+        if "".join(ch for ch in browser.read(cpf_group) if ch.isdigit()) != cpf_digits:
+            return _fail(browser, "O CPF nao ficou no campo da recuperacao de senha")
+        if email and browser.visible(email_group, 500) and browser.read(email_group).strip().lower() != email.strip().lower():
+            return _fail(browser, "O e-mail nao ficou no campo da recuperacao de senha")
+    except Exception:  # noqa: BLE001
+        pass
     browser.click("reset_submit")
-    if browser.visible("reset_confirmation", 15000):
-        return StepResult(True, "Link de criacao de senha enviado ao e-mail cadastrado")
+    deadline = time.monotonic() + 20
+    while time.monotonic() < deadline:
+        said = _dialog_text(browser) or " | ".join(_messages(browser))
+        if browser.visible("reset_confirmation", 500):
+            return StepResult(True, "Link de criacao de senha enviado ao e-mail cadastrado"
+                              + (f" (PJe: {said})" if said else ""))
+        if said and (_REJECTED.search(said) or _NEGATION.search(said)):
+            return StepResult(False, f"O PJe recusou o pedido de nova senha (PJe: {said})")
     return _fail(browser, "O PJe nao confirmou o envio do link de senha")
 
 
-def set_password(browser, config, link: str, password: str) -> StepResult:
-    """Etapa 4: abre o link recebido por e-mail e cadastra a senha."""
+def set_password(browser, config, link: str, password: str, fallback_password: str | None = None) -> StepResult:
+    """Etapa 4: abre o link recebido por e-mail e cadastra a senha.
+
+    Se a pagina recusar a senha (ex.: o TJAP aceita so letras e numeros), tenta de novo na mesma
+    tela com fallback_password. StepResult.value traz a senha que ficou cadastrada.
+    """
     ensure_selectors(config)
     host = (urlparse(link).hostname or "").lower()
     if urlparse(link).scheme != "https" or not host.endswith(".jus.br"):
@@ -181,16 +220,114 @@ def set_password(browser, config, link: str, password: str) -> StepResult:
     if not browser.visible("new_password", 5000) and browser.visible("password_link_proceed", 5000):
         browser.click("password_link_proceed")
     if not browser.visible("new_password", 15000):
-        return _fail(browser, "Tela de nova senha nao abriu (link expirado ou ja usado?)")
+        failed = _fail(browser, "Tela de nova senha nao abriu (link expirado ou ja usado?)")
+        failed.expired = True
+        return failed
+    last = StepResult(False, "O PJe nao aceitou a nova senha")
+    for candidate in [p for p in (password, fallback_password) if p]:
+        last = _submit_password(browser, candidate)
+        if last.ok or last.uncertain or last.expired or not browser.visible("new_password", 1000):
+            return last
+        _close_dialog(browser)
+    return last
+
+
+# Janelas de mensagem do PJe (RichFaces/JSF, Bootstrap) que aparecem por cima do formulario.
+JS_DIALOG_TEXT = r"""() => {
+  const vis = e => !!(e.getClientRects().length) && getComputedStyle(e).visibility !== 'hidden'
+                 && getComputedStyle(e).display !== 'none';
+  const sel = '.rich-mpnl-body,.rich-mpnl-content,.rich-modalpanel,[role=dialog],.modal.show,.ui-dialog-content';
+  const out = [];
+  for (const el of document.querySelectorAll(sel)) {
+    if (!vis(el)) continue;
+    const t = (el.innerText || '').trim().replace(/\s+/g, ' ');
+    if (t && !out.some(o => o.includes(t) || t.includes(o))) out.push(t.slice(0, 300));
+  }
+  return out.slice(0, 3);
+}"""
+
+_SUCCESS = re.compile(r"sucesso|ativad[ao]|cadastrad[ao]|alterad[ao]|atualizad[ao]", re.I)
+_EXPIRED = re.compile(r"expirad|venceu|vencid|j[a\u00e1] (foi )?(utilizad|usad)|link inv[a\u00e1]lid|"
+                      r"token inv[a\u00e1]lid|n[a\u00e3]o (foi )?(encontrad|localizad)|inexistente|"
+                      r"n[a\u00e3]o foi poss[i\u00ed]vel encontrar o usu[a\u00e1]rio", re.I)
+_NEGATION = re.compile(r"\bn[a\u00e3]o\b|erro|falha", re.I)
+
+
+def _dialog_text(browser) -> str:
+    page = getattr(browser, "page", None)
+    if page is None:
+        return ""
+    try:
+        return " | ".join(page.evaluate(JS_DIALOG_TEXT))
+    except Exception:  # noqa: BLE001
+        return ""
+
+
+def _close_dialog(browser) -> None:
+    page = getattr(browser, "page", None)
+    if page is None:
+        return
+    for sel in (".rich-modalpanel :is(input,button,a):visible",
+                "[role=dialog] :is(button,input,a):visible", ".modal.show :is(button,a):visible"):
+        try:
+            loc = page.locator(sel)
+            for i in range(min(loc.count(), 6)):
+                item = loc.nth(i)
+                label = (item.inner_text(timeout=500) or item.get_attribute("value") or "").strip()
+                if re.fullmatch(r"(?i)ok|fechar|voltar|continuar|x|\u00d7|close", label):
+                    item.click(timeout=3000)
+                    page.wait_for_timeout(500)
+                    return
+        except Exception:  # noqa: BLE001
+            continue
+    try:
+        page.keyboard.press("Escape")
+    except Exception:  # noqa: BLE001
+        pass
+
+
+def _submit_password(browser, password: str) -> StepResult:
     browser.fill("new_password", password)
     if browser.visible("confirm_password", 1500):
         browser.fill("confirm_password", password)
-    browser.click("password_submit")
-    if browser.visible("password_done", 10000):
-        return StepResult(True, "Senha cadastrada")
-    if browser.wait_hidden("new_password", 10000) and not _messages(browser):
-        return StepResult(True, "Senha cadastrada (a tela de nova senha foi concluida)")
-    return _fail(browser, "O PJe nao aceitou a nova senha")
+    try:
+        browser.click("password_submit")
+    except Exception as exc:  # noqa: BLE001
+        dialog = _dialog_text(browser)
+        return StepResult(False, "Nao foi possivel clicar em cadastrar"
+                          + (f" (janela do PJe: {dialog})" if dialog else f" ({type(exc).__name__})"))
+    deadline = time.monotonic() + 15
+    hidden_since = None
+    while time.monotonic() < deadline:
+        dialog = _dialog_text(browser)
+        if dialog:
+            # Le a janela de mensagem do PJe e decide pelo texto.
+            if _EXPIRED.search(dialog):
+                return StepResult(False, f"Link expirado ou ja usado (PJe: {dialog})", expired=True)
+            if _SUCCESS.search(dialog):
+                if not _NEGATION.search(dialog):
+                    return StepResult(True, f"Senha cadastrada (PJe: {dialog})", password)
+                return StepResult(False, f"Resultado incerto (PJe: {dialog})", password, uncertain=True)
+            if _REJECTED.search(dialog) or _NEGATION.search(dialog):
+                return StepResult(False, f"O PJe recusou a senha (PJe: {dialog})")
+        if browser.visible("password_done", 500):
+            return StepResult(True, "Senha cadastrada", password)
+        if not browser.visible("new_password", 300):
+            # A pagina JSF recarrega apos o clique: so conta se o formulario sumir de vez.
+            hidden_since = hidden_since or time.monotonic()
+            if time.monotonic() - hidden_since >= 3 and not any(_REJECTED.search(m) for m in _messages(browser)):
+                return StepResult(True, "Senha cadastrada (a tela de nova senha foi concluida)", password)
+            continue
+        hidden_since = None
+        messages = _messages(browser)
+        if any(_EXPIRED.search(m) for m in messages):
+            return StepResult(False, "Link expirado ou ja usado: " + " | ".join(messages), expired=True)
+        if any(_REJECTED.search(m) for m in messages):
+            return StepResult(False, "O PJe recusou a senha: " + " | ".join(messages))
+    # Nao da para saber se o PJe gravou: a senha vai para a planilha marcada como incerta.
+    dialog = _dialog_text(browser)
+    return StepResult(False, "Resultado incerto: o PJe nao confirmou nem recusou a senha"
+                      + (f" (janela: {dialog})" if dialog else ""), password, uncertain=True)
 
 
 def test_login(browser, config, cpf: str, password: str,

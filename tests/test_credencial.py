@@ -32,6 +32,36 @@ PAGES = {
         <label for=email>Email</label><input id=email name=email type=email>
         <button type=button onclick="if(login.value&&email.value){msg.textContent='Foi enviado um e-mail com as instrucoes'}">SOLICITAR</button>
         <p id=msg></p></div>""",
+    "/ativacao": """<p>Prezado(a) FULANO, para ativar seu cadastro, insira uma nova senha contendo letras, numeros
+      e tamanho entre 8 e 64 caracteres.</p>
+      <form id=cadastrarNovaSenhaForm onsubmit="event.preventDefault();
+        var s=document.getElementById('cadastrarNovaSenhaForm:senha').value;
+        var c=document.getElementById('cadastrarNovaSenhaForm:confirmacao').value;
+        if(!/^[A-Za-z0-9]{8,64}$/.test(s)||s!==c){document.getElementById('err').innerHTML='<span class=rich-messages>Senha invalida: use apenas letras e numeros</span>';return;}
+        document.body.innerHTML='<p>Senha cadastrada com sucesso</p>';">
+        <label for="cadastrarNovaSenhaForm:senha">Digite a senha</label>
+        <input type=password id="cadastrarNovaSenhaForm:senha" name="cadastrarNovaSenhaForm:senha">
+        <label for="cadastrarNovaSenhaForm:confirmacao">Digite-a novamente</label>
+        <input type=password id="cadastrarNovaSenhaForm:confirmacao" name="cadastrarNovaSenhaForm:confirmacao">
+        <input type=submit id="cadastrarNovaSenhaForm:cadastrarSenhaButton" value=Cadastrar>
+        <input type=submit id="cadastrarNovaSenhaForm:redirectPjeButton" value="Ir para PJE" onclick="location.href='/painel';return false;">
+        <div id=err></div></form>""",
+    "/ativacao-modal": """<p>Prezado(a) FULANO, insira uma nova senha contendo letras, numeros.</p>
+      <form id=cadastrarNovaSenhaForm onsubmit="event.preventDefault();
+        var s=document.getElementById('cadastrarNovaSenhaForm:senha').value;
+        var txt = location.search.includes('velho') ? 'Usuario nao localizado.' :
+                  (/^[A-Za-z0-9]+$/.test(s) ? 'Senha cadastrada com sucesso.' : 'Senha invalida.');
+        document.getElementById('panelMsgAtivacaoSenhaContainer').style.display='block';
+        document.getElementById('msgtxt').textContent=txt;">
+        <label for="cadastrarNovaSenhaForm:senha">Digite a senha</label>
+        <input type=password id="cadastrarNovaSenhaForm:senha">
+        <label for="cadastrarNovaSenhaForm:confirmacao">Digite-a novamente</label>
+        <input type=password id="cadastrarNovaSenhaForm:confirmacao">
+        <input type=submit id="cadastrarNovaSenhaForm:cadastrarSenhaButton" value=Cadastrar></form>
+      <div class="rich-modalpanel" id=panelMsgAtivacaoSenhaContainer style="display:none">
+        <div class=rich-mpnl-mask-div style="position:fixed;inset:0;background:#0006"></div>
+        <div class=rich-mpnl-body style="position:fixed;top:40%;left:40%;background:#fff"><span id=msgtxt></span>
+        <input type=button value=OK onclick="this.closest('.rich-modalpanel').style.display='none'"></div></div>""",
     "/action": """<a href="/update">Clique aqui para prosseguir</a>""",
     "/update": """<form action="/updated"><input id=password-new type=password><input id=password-confirm type=password>
       <div id=kc-form-buttons><input type=submit value=Enviar></div></form>""",
@@ -104,3 +134,21 @@ def test_janela_de_recuperacao_sobre_o_login_tjap(browser):
     assert step.ok, step.detail
     assert browser.page.input_value("#username") == ""
     assert browser.page.input_value("#login") == "12345678901"
+
+
+def test_pagina_de_ativacao_do_pje_tjap_com_senha_reserva(browser):
+    """TJAP: pagina propria (JSF) que so aceita letras e numeros; a senha com simbolo e recusada."""
+    step = set_password(browser, browser.config, HOST + "/ativacao", "Ab3$xY9!kLm2#pQr", "Ab3xY9kLm2pQrT7uV8wZ")
+    assert step.ok, step.detail
+    assert step.value == "Ab3xY9kLm2pQrT7uV8wZ"
+
+
+def test_janela_de_mensagem_do_tjap_sucesso(browser):
+    step = set_password(browser, browser.config, HOST + "/ativacao-modal", "Ab3xY9kLm2pQrT7uV8wZ", "Ab3$xY9!kLm2#pQr")
+    assert step.ok and step.value == "Ab3xY9kLm2pQrT7uV8wZ", step.detail
+
+
+def test_janela_de_mensagem_do_tjap_usuario_nao_localizado(browser):
+    """Link antigo: o TJAP abre a tela, mas responde 'Usuario nao localizado' -> pedir link novo."""
+    step = set_password(browser, browser.config, HOST + "/ativacao-modal?velho=1", "Ab3xY9kLm2pQrT7uV8wZ")
+    assert not step.ok and step.expired, step.detail

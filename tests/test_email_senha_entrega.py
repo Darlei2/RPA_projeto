@@ -145,20 +145,29 @@ def test_assistente_completo_gera_senha_e_planilha(tmp_path, monkeypatch):
         def close(self):
             pass
 
+    old_link = "https://pje.tjap.jus.br/1g/Senha/ativacaoSenha.seam?codigo=velho"
+    new_link = "https://pje.tjap.jus.br/1g/Senha/ativacaoSenha.seam?codigo=novo"
+
     class FakeInbox:
-        def wait_for_password_link(self, since, timeout_s, on_wait=None):
-            return "https://sso.cloud.pje.jus.br/x/login-actions/action-token?key=1"
+        def known_links(self):
+            return frozenset({old_link})
+
+        def wait_for_password_link(self, since, timeout_s, on_wait=None, exclude=frozenset()):
+            assert old_link in exclude  # o link antigo nunca pode ser usado
+            return new_link
 
     def fake_set(browser, config, link, password):
-        used["senha"] = password
-        return StepResult(True, "Senha cadastrada")
+        used["senha"], used["link"] = password, link
+        return StepResult(True, "Senha cadastrada", password)
 
     monkeypatch.setattr(browser_mod, "PlaywrightBrowser", FakeBrowser)
-    monkeypatch.setattr(senha_cli, "request_password_link", lambda *a: StepResult(True, "enviado"))
-    monkeypatch.setattr(senha_cli, "set_password", fake_set)
+    requests = []
+    monkeypatch.setattr(senha_cli, "request_password_link",
+                        lambda *a: requests.append(1) or StepResult(True, "enviado"))
+    monkeypatch.setattr(senha_cli, "set_password", lambda b, c, l, p, f=None: fake_set(b, c, l, p))
     monkeypatch.setattr(senha_cli, "test_login", lambda *a: StepResult(True, "login ok"))
     monkeypatch.setattr(senha_cli, "_setup_inbox", lambda email: FakeInbox())
-    answers = iter(["Fulano de Tal", "012.345.678-90", "adv@gmail.com", ""])
+    answers = iter(["Fulano de Tal", "012.345.678-90", "adv@gmail.com", "", ""])
     monkeypatch.setattr(builtins, "input", lambda prompt="": next(answers))
     secrets_ = iter(["", "planilha", "planilha"])
     monkeypatch.setattr(getpass, "getpass", lambda prompt="": next(secrets_))
@@ -166,8 +175,22 @@ def test_assistente_completo_gera_senha_e_planilha(tmp_path, monkeypatch):
     config = SimpleNamespace(tribunal="TJAP - 1o grau", base_url="https://pje.tjap.jus.br/1g/login.seam")
     code = senha_cli.run_password_wizard([config], tmp_path / "audit", tmp_path / "entregas")
     assert code == 0
+    assert requests == [1]  # sempre pede um link novo
+    assert used["link"] == new_link
     [arquivo] = list((tmp_path / "entregas").glob("credenciais-*.xlsx"))
     ws = abrir_planilha(arquivo, "planilha").active
-    assert ws["F2"].value == used["senha"] and len(used["senha"]) == 16
+    assert ws["F2"].value == used["senha"] and len(used["senha"]) == 20 and used["senha"].isalnum()
     audit_text = "".join(p.read_text(encoding="utf-8") for p in (tmp_path / "audit").rglob("*.json*"))
     assert used["senha"] not in audit_text and "action-token" not in audit_text
+
+
+def test_senha_so_letras_e_numeros():
+    for _ in range(100):
+        s = gerar_senha(20, especiais=False)
+        assert len(s) == 20 and s.isalnum()
+        assert any(c.isupper() for c in s) and any(c.islower() for c in s) and any(c.isdigit() for c in s)
+
+
+def test_link_que_ja_estava_na_caixa_nao_e_usado():
+    antigo = _msg(when=AGORA + timedelta(seconds=30))
+    assert find_link_in_messages([antigo], AGORA, exclude=frozenset({LINK.replace("&amp;", "&")})) is None
