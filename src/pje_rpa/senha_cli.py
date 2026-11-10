@@ -112,7 +112,7 @@ def _secret(prompt: str, allow_empty: bool = False) -> str:
     return ""
 
 
-def _report_failure(browser, audit, step_name: str) -> None:
+def _report_failure(browser, audit, step_name: str, pause: bool = True) -> None:
     """Mostra o que estava na tela, salva um print local e deixa o Edge aberto para conferir."""
     import json
 
@@ -120,7 +120,8 @@ def _report_failure(browser, audit, step_name: str) -> None:
     print("\n--- Tela no momento da falha (numeros mascarados) ---")
     print(json.dumps(info, ensure_ascii=False, indent=2))
     print("Print salvo em:", info.get("print", "(nao foi possivel salvar)"))
-    _ask("\nO Edge continua aberto para voce conferir. Pressione Enter para continuar... ")
+    if pause:
+        _ask("\nO Edge continua aberto para voce conferir. Pressione Enter para continuar... ")
 
 
 def _setup_inbox(email_address: str):
@@ -219,7 +220,8 @@ def _passwords() -> tuple[str, str]:
     return gerar_senha(20, especiais=False), gerar_senha(16)
 
 
-def _one_tribunal(config, audit_root: Path, lawyer: dict, inbox, secret_2fa: str) -> LinhaCredencial:
+def _one_tribunal(config, audit_root: Path, lawyer: dict, inbox, secret_2fa: str,
+                  pause: bool = True) -> LinhaCredencial:
     from .browser import PlaywrightBrowser
 
     print(f"\n== {config.tribunal} ==")
@@ -244,7 +246,7 @@ def _one_tribunal(config, audit_root: Path, lawyer: dict, inbox, secret_2fa: str
         print(("OK: " if requested.ok else "FALHA: ") + requested.detail)
         if not requested.ok:
             linha.observacao = requested.detail
-            _report_failure(browser, audit, "pedido-link")
+            _report_failure(browser, audit, "pedido-link", pause)
             return linha
         link, from_inbox = _get_link(inbox, since, known)
         audit.record("password_link_obtained", "CREDENTIAL", {"ok": bool(link), "from_inbox": from_inbox})
@@ -264,7 +266,7 @@ def _one_tribunal(config, audit_root: Path, lawyer: dict, inbox, secret_2fa: str
             print("A senha tentada vai para a planilha marcada como 'Incerto: conferir'.")
         if not step.ok:
             linha.observacao = step.detail
-            _report_failure(browser, audit, "nova-senha")
+            _report_failure(browser, audit, "nova-senha", pause)
             return linha
         linha.senha, linha.senha_cadastrada = password, True
 
@@ -274,7 +276,7 @@ def _one_tribunal(config, audit_root: Path, lawyer: dict, inbox, secret_2fa: str
         linha.login_testado = step.ok
         if not step.ok:
             linha.observacao = step.detail
-            _report_failure(browser, audit, "login-senha")
+            _report_failure(browser, audit, "login-senha", pause)
         status = "CREDENTIAL_OK" if step.ok else "CREDENTIAL_FAILED"
         return linha
     finally:

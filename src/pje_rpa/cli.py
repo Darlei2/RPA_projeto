@@ -53,6 +53,16 @@ def build_parser() -> argparse.ArgumentParser:
     password.add_argument("--saida", type=Path, default=Path("entregas"),
                           help="Pasta da planilha de entrega (protegida por senha)")
 
+    run = sub.add_parser("executar", help="Fluxo inteiro (cadastro + senha + teste) para os advogados de uma planilha")
+    run.add_argument("--tribunal", default="", help="Ex.: tjap (sem ele, o robo pergunta)")
+    run.add_argument("--planilha", default="", help="Ex.: planilhas\\advogados.xlsx (sem ela, o robo pergunta)")
+    mode = run.add_mutually_exclusive_group()
+    mode.add_argument("--ensaio", action="store_true", default=None, help="Para antes de enviar (nada e assinado)")
+    mode.add_argument("--real", action="store_true", default=None, help="Cadastro real (tribunal precisa estar liberado)")
+    run.add_argument("--modelo", action="store_true", help="So cria a planilha modelo em planilhas\\advogados.xlsx")
+    run.add_argument("--audit-root", type=Path, default=Path("runtime/audit"))
+    run.add_argument("--saida", type=Path, default=Path("entregas"))
+
     report = sub.add_parser("relatorio", help="Resume os resultados por tribunal e confere a meta de validacao")
     report.add_argument("--audit-root", type=Path, default=Path("runtime/audit"))
     report.add_argument("--meta", type=int, default=5, help="Minimo de tribunais com cadastro real")
@@ -95,6 +105,18 @@ def main(argv: list[str] | None = None) -> int:
         if args.command == "senha":
             from .senha_cli import run_password_wizard
             return run_password_wizard([load_config(p) for p in args.config], args.audit_root, args.saida)
+        if args.command == "executar":
+            from .lote import PLANILHA_PADRAO, run_executar
+            if args.modelo:
+                from .planilha import gravar_modelo
+                destino = Path(args.planilha) if args.planilha else PLANILHA_PADRAO
+                if destino.exists():
+                    print(f"Ja existe: {destino} (nao foi sobrescrita)")
+                else:
+                    print(f"Planilha modelo criada: {gravar_modelo(destino)}")
+                return 0
+            ensaio = True if args.ensaio else (False if args.real else None)
+            return run_executar(args.audit_root, args.saida, args.tribunal, args.planilha, ensaio)
         if args.command == "relatorio":
             from .tribunais import format_relatorio, relatorio
             data = relatorio(args.audit_root, args.meta)

@@ -37,6 +37,7 @@ class PJeRegistrationFlow:
         audit: AuditLog,
         code_provider: CodeProvider,
         rehearsal: bool = False,
+        request_password: bool = True,
     ) -> None:
         self.config = config
         self.record = record
@@ -48,6 +49,8 @@ class PJeRegistrationFlow:
         self.code_provider = code_provider
         # Ensaio: roda no PJe real, mas para antes de "Confirmar dados" (nada e enviado nem assinado).
         self.rehearsal = rehearsal
+        # Execucao em lote (lote.py) cuida da senha com a caixa de e-mail: aqui so cadastra.
+        self.request_password = request_password
         self.state = FlowState.START
 
     def run(self) -> RunResult:
@@ -247,7 +250,7 @@ class PJeRegistrationFlow:
             return self._blocked(blocked) if blocked else self._failed("Conclusao do cadastro nao confirmada")
         self._transition(FlowState.COMPLETED, "registration_completed")
         reason = "Cadastro concluido e confirmado pela tela final"
-        if hasattr(self.browser, "page"):
+        if self.request_password and hasattr(self.browser, "page"):
             reason += ". " + self._request_password_link()
         return self._result(RunStatus.COMPLETED, reason)
 

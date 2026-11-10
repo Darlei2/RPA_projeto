@@ -153,3 +153,23 @@ O relatorio so conta para a meta os tribunais com cadastro real **e** credencial
 
 Meta de validacao: cadastro real (`COMPLETED`) em pelo menos 5 tribunais, com 1 TRF, 1 TRT e 1 TJ.
 `ALREADY_REGISTERED` nao conta: escolha tribunais em que o advogado ainda nao tem cadastro.
+
+## 7. Execucao geral (planilha, um advogado por linha)
+
+Um comando faz o fluxo inteiro para cada advogado da planilha, no tribunal escolhido:
+cadastro com o A1 -> termo assinado -> "Solicitar nova senha" -> link do e-mail -> senha forte
+-> teste de CPF + senha + 2FA -> planilha de entrega protegida (`entregas\credenciais-<data>.xlsx`).
+
+```powershell
+.\scripts\executar.ps1 -Modelo     # 1a vez: cria planilhas\advogados.xlsx para preencher
+.\scripts\executar.ps1             # pergunta o tribunal, o modo e a planilha
+.\scripts\executar.ps1 -Tribunal tjpe -Planilha planilhas\advogados.xlsx
+```
+
+- Tribunal sem envio real liberado no `.toml` roda so em ENSAIO.
+- Colunas obrigatorias: nome, cpf, oab_numero, oab_uf, email, telefone, cep, logradouro, numero,
+  bairro, cidade, uf, certificado (caminho do .pfx). `autorizacao_ref` e obrigatoria no modo real.
+- Opcionais e sensiveis: senha_certificado, chave_2fa, imap_senha. Vazias = o robo pergunta na hora.
+  Se preencher, proteja a planilha com senha no Excel; a pasta `planilhas\` nao vai para o Git.
+- `executar = N` pula a linha. Um advogado com erro nao para o lote.
+- Advogado ja cadastrado no tribunal: a senha so e trocada se o operador confirmar no inicio.
