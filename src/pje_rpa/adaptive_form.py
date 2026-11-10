@@ -471,26 +471,22 @@ def static_location_matches(
     city: str,
     uf: str,
 ) -> bool:
-    parts = re.split(
-        r"\s*/\s*",
-        norm(value),
-        maxsplit=1,
-    )
+    """Compara o texto "Municipio/UF" do PJe com a cidade e a UF da planilha.
 
-    if len(parts) != 2:
+    Aceita "Belo Horizonte/MG", "BELO HORIZONTE - MG", "Belo Horizonte (MG)",
+    "Belo Horizonte, Minas Gerais", com ou sem acento e em qualquer caixa.
+    """
+    text = norm(value)
+    match = re.fullmatch(r"(.+?)\s*(?:[/,\-\u2013]\s*|\(\s*)([a-z ]+?)\s*\)?", text)
+    if not match:
         return False
+    found_city, found_state = match.group(1).strip(), match.group(2).strip()
 
-    expected_state = norm(
-        UF_NAMES.get(str(uf).upper(), "")
-    )
+    def bare(name: str) -> str:
+        return re.sub(r"[^a-z0-9]+", " ", norm(name)).strip()
 
-    return (
-        parts[0] == norm(city)
-        and parts[1] in {
-            norm(uf),
-            expected_state,
-        }
-    )
+    expected_state = norm(UF_NAMES.get(str(uf).upper(), ""))
+    return bare(found_city) == bare(city) and found_state in {norm(uf), expected_state}
 
 
 def scan(page: Any) -> dict[str, Any]:

@@ -148,6 +148,11 @@ class PJeRegistrationFlow:
             preserved_address = []
 
             for issue in report.get("pending", []):
+                # "Municipio/UF" e texto fixo do PJe (endereco que ja existe no cadastro dele):
+                # o robo nao consegue alterar e, como logradouro/complemento, preserva e registra.
+                if issue == "municipio_uf_divergente":
+                    preserved_address.append("municipio_uf")
+                    continue
                 if isinstance(issue, str) and issue.startswith(prefix):
                     field = issue[len(prefix):]
                     if field in allowed:
