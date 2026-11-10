@@ -1,25 +1,39 @@
 """Assistente de console para as etapas de senha (scripts\\criar-senha.ps1).
 
-Pergunta CPF, e-mail, link recebido, senha e chave do 2FA na hora: nada vai para a
-linha de comando, para o historico do PowerShell, para o disco ou para a auditoria.
+Fluxo por tribunal: pede o link ("Solicitar nova senha"), le o link na caixa de e-mail (IMAP)
+ou recebe o link colado, gera uma senha forte, cadastra a senha e testa CPF + senha + 2FA.
+No fim, grava uma planilha protegida por senha com uma linha por tribunal.
+
+Senha da caixa de e-mail, senha do PJe, chave do 2FA e link nunca vao para a linha de
+comando, o historico do PowerShell, o log ou a auditoria. A senha do PJe so vai para a
+planilha criptografada (e para a tela, se a planilha nao puder ser gravada).
 """
 from __future__ import annotations
 
 import getpass
+import os
 import re
 import time
+from datetime import datetime, timezone
+from pathlib import Path
 
 from .audit import AuditLog
 from .credencial import diagnose, request_password_link, set_password, test_login
+from .entrega import LinhaCredencial, salvar_planilha
+from .senha_forte import gerar_senha
 from .totp import gerar_totp, normalizar_chave
+
+LINK_TIMEOUT_S = 300
 
 
 def _ask(prompt: str) -> str:
     return input(prompt).strip()
 
 
-def _yes(prompt: str) -> bool:
-    return _ask(prompt + " [s/N]: ").casefold() in {"s", "sim", "y"}
+def _yes(prompt: str, default: bool = False) -> bool:
+    hint = "[S/n]" if default else "[s/N]"
+    answer = _ask(f"{prompt} {hint}: ").casefold()
+    return default if not answer else answer in {"s", "sim", "y"}
 
 
 def _code_provider(secret: str):
@@ -41,69 +55,157 @@ def _report_failure(browser, audit, step_name: str) -> None:
     print("\n--- Tela no momento da falha (numeros mascarados) ---")
     print(json.dumps(info, ensure_ascii=False, indent=2))
     print("Print salvo em:", info.get("print", "(nao foi possivel salvar)"))
-    _ask("\nO Edge continua aberto para voce conferir. Pressione Enter para fechar... ")
+    _ask("\nO Edge continua aberto para voce conferir. Pressione Enter para continuar... ")
 
 
-def run_password_wizard(config, audit_root) -> int:
+def _setup_inbox(email_address: str):
+    """Pergunta como acessar a caixa. Devolve None quando o operador vai colar o link."""
+    from .email_inbox import ImapInbox, guess_imap_host
+
+    if not _yes("Ler o link automaticamente na caixa de e-mail (IMAP)?", default=True):
+        return None
+    host = os.environ.get("PJE_RPA_IMAP_HOST") or guess_imap_host(email_address) or ""
+    host = _ask(f"Servidor IMAP [{host}]: ") or host if host else _ask("Servidor IMAP (ex.: imap.gmail.com): ")
+    user = os.environ.get("PJE_RPA_IMAP_USER") or email_address
+    user = _ask(f"Usuario da caixa [{user}]: ") or user
+    secret = os.environ.get("PJE_RPA_IMAP_SENHA") or getpass.getpass(
+        "Senha de app da caixa (nao aparece na tela; Gmail: myaccount.google.com/apppasswords): ")
+    inbox = ImapInbox(host=host, user=user, password=secret.replace(" ", ""))
+    try:
+        inbox.check_login()
+    except Exception as exc:  # noqa: BLE001
+        print(f"FALHA ao entrar na caixa de e-mail ({type(exc).__name__}). O link sera colado manualmente.")
+        return None
+    print("OK: caixa de e-mail acessada")
+    return inbox
+
+
+def _get_link(inbox, since: datetime) -> tuple[str, bool]:
+    if inbox is not None:
+        print(f"Aguardando o e-mail do PJe (ate {LINK_TIMEOUT_S // 60} min)...")
+        link = inbox.wait_for_password_link(
+            since, LINK_TIMEOUT_S, on_wait=lambda left: print(f"  ainda nao chegou ({left}s restantes)"))
+        if link:
+            print("OK: link de senha encontrado no e-mail")
+            return link, True
+        print("O e-mail nao chegou no prazo (confira tambem o spam).")
+    return _ask("Cole o link recebido no e-mail (Enter vazio = pular este tribunal): "), False
+
+
+def _one_tribunal(config, audit_root: Path, lawyer: dict, inbox, secret_2fa: str) -> LinhaCredencial:
     from .browser import PlaywrightBrowser
 
-    print(f"\n== Credencial CPF + senha + 2FA: {config.tribunal} ==\n")
-    cpf = re.sub(r"\D", "", _ask("CPF do advogado: "))
-    if len(cpf) != 11:
-        print("CPF invalido")
-        return 2
-
-    audit_root.mkdir(parents=True, exist_ok=True)
+    print(f"\n== {config.tribunal} ==")
+    linha = LinhaCredencial(config.tribunal, config.base_url, lawyer["nome"], lawyer["cpf"], lawyer["email"],
+                            chave_2fa=lawyer["chave_2fa_exibir"])
     audit = AuditLog(audit_root)
     audit.record("credential_wizard_started", "CREDENTIAL", {"tribunal": config.tribunal})
     browser = PlaywrightBrowser(config)
-    status, reason = "CREDENTIAL_FAILED", "Interrompido"
+    status = "CREDENTIAL_FAILED"
     try:
-        if _yes("Pedir agora o link de criacao de senha ('Esqueceu a senha?')?"):
-            email = _ask("E-mail cadastrado no PJe: ")
-            step = request_password_link(browser, config, cpf, email)
-            audit.record("password_link_requested" if step.ok else "password_link_request_failed",
-                         "CREDENTIAL", {"ok": step.ok})
-            print(("OK: " if step.ok else "FALHA: ") + step.detail)
-            if not step.ok:
-                reason = step.detail
-                _report_failure(browser, audit, "pedido-link")
-                return 3
+        since = datetime.now(timezone.utc)
+        step = request_password_link(browser, config, lawyer["cpf"], lawyer["email"])
+        audit.record("password_link_requested" if step.ok else "password_link_request_failed",
+                     "CREDENTIAL", {"ok": step.ok})
+        print(("OK: " if step.ok else "FALHA: ") + step.detail)
+        if not step.ok:
+            linha.observacao = step.detail
+            _report_failure(browser, audit, "pedido-link")
+            return linha
 
-        link = _ask("\nCole o link recebido no e-mail (Enter vazio = parar aqui): ")
+        link, from_inbox = _get_link(inbox, since)
+        audit.record("password_link_obtained", "CREDENTIAL", {"ok": bool(link), "from_inbox": from_inbox})
         if not link:
-            reason = "Link de senha ainda nao recebido"
-            print("Quando o e-mail chegar, rode este script de novo e responda N ao pedido de link.")
-            return 3
+            linha.observacao = "Link de senha nao recebido"
+            return linha
 
-        while True:
-            password = getpass.getpass("Nova senha (nao aparece na tela): ")
-            if password and password == getpass.getpass("Repita a senha: "):
-                break
-            print("As senhas nao conferem, tente de novo.")
-
+        password = gerar_senha()
         step = set_password(browser, config, link, password)
+        link = ""
         audit.record("password_set" if step.ok else "password_set_failed", "CREDENTIAL", {"ok": step.ok})
         print(("OK: " if step.ok else "FALHA: ") + step.detail)
         if not step.ok:
-            reason = step.detail
+            linha.observacao = step.detail
             _report_failure(browser, audit, "nova-senha")
-            return 3
+            return linha
+        linha.senha, linha.senha_cadastrada = password, True
 
-        secret = normalizar_chave(getpass.getpass(
-            "Chave do 2FA em Base32 (Enter vazio = digitar o codigo na hora): ") or None)
-        step = test_login(browser, config, cpf, password, _code_provider(secret))
-        password = secret = ""
+        step = test_login(browser, config, lawyer["cpf"], password, _code_provider(secret_2fa))
         audit.record("password_login_tested", "CREDENTIAL", {"ok": step.ok})
         print(("OK: " if step.ok else "FALHA: ") + step.detail)
+        linha.login_testado = step.ok
         if not step.ok:
+            linha.observacao = step.detail
             _report_failure(browser, audit, "login-senha")
-        status, reason = ("CREDENTIAL_OK" if step.ok else "CREDENTIAL_FAILED"), step.detail
-        return 0 if step.ok else 3
+        status = "CREDENTIAL_OK" if step.ok else "CREDENTIAL_FAILED"
+        return linha
     finally:
         audit.write_result({"run_id": audit.run_id, "kind": "credencial", "status": status,
-                            "reason": reason, "details": {"tribunal": config.tribunal}})
+                            "reason": linha.observacao or "ok", "details": {"tribunal": config.tribunal}})
         try:
             browser.close()
         except Exception:  # noqa: BLE001
             pass
+
+
+def _deliver(linhas: list[LinhaCredencial], output_dir: Path) -> None:
+    if not any(l.senha_cadastrada for l in linhas):
+        print("\nNenhuma senha foi cadastrada; nada para entregar.")
+        return
+    destino = output_dir / f"credenciais-{datetime.now():%Y%m%d-%H%M%S}.xlsx"
+    print("\nA planilha sai protegida: o Excel pede uma senha para abrir.")
+    while True:
+        file_password = getpass.getpass("Senha para abrir a planilha (nao aparece na tela): ")
+        if file_password and file_password == getpass.getpass("Repita a senha da planilha: "):
+            break
+        print("As senhas nao conferem, tente de novo.")
+    try:
+        salvar_planilha(linhas, destino, file_password)
+        print(f"OK: planilha gravada em {destino}")
+    except Exception as exc:  # noqa: BLE001
+        # As senhas ja foram trocadas no PJe: sem a planilha elas se perderiam.
+        print(f"FALHA ao gravar a planilha ({type(exc).__name__}: {exc}).")
+        print("Instale com: .venv\\Scripts\\python.exe -m pip install openpyxl msoffcrypto-tool")
+        print("Anote agora as credenciais abaixo (nao serao mostradas de novo):")
+        for l in linhas:
+            if l.senha_cadastrada:
+                print(f"  {l.tribunal} | {l.url_login} | {l.advogado} | CPF {l.cpf} | senha: {l.senha}")
+    finally:
+        for l in linhas:
+            l.senha = ""
+
+
+def run_password_wizard(configs, audit_root: Path, output_dir: Path = Path("entregas")) -> int:
+    configs = configs if isinstance(configs, list) else [configs]
+    print("\n== Credencial CPF + senha + 2FA: " + ", ".join(c.tribunal for c in configs) + " ==\n")
+    nome = _ask("Nome do advogado: ")
+    cpf = re.sub(r"\D", "", _ask("CPF do advogado: "))
+    if len(cpf) != 11 or not nome:
+        print("Nome ou CPF invalido")
+        return 2
+    email_address = _ask("E-mail cadastrado no PJe: ")
+    inbox = _setup_inbox(email_address)
+    raw_2fa = getpass.getpass("Chave do 2FA em Base32 (Enter vazio = digitar o codigo na hora): ")
+    secret_2fa = normalizar_chave(raw_2fa or None)
+    lawyer = {"nome": nome, "cpf": cpf, "email": email_address,
+              "chave_2fa_exibir": (raw_2fa or "").replace(" ", "").upper()}
+    if lawyer["chave_2fa_exibir"] and not _yes("Incluir a chave do 2FA na planilha (o analista precisa dela para logar)?",
+                                               default=True):
+        lawyer["chave_2fa_exibir"] = ""
+
+    audit_root.mkdir(parents=True, exist_ok=True)
+    linhas: list[LinhaCredencial] = []
+    try:
+        for config in configs:
+            linhas.append(_one_tribunal(config, audit_root, lawyer, inbox, secret_2fa))
+    except KeyboardInterrupt:
+        print("\nInterrompido pelo operador.")
+    finally:
+        _deliver(linhas, output_dir)
+        secret_2fa = lawyer["chave_2fa_exibir"] = ""
+
+    print("\nResumo:")
+    for l in linhas:
+        print(f"  {l.tribunal}: senha {'cadastrada' if l.senha_cadastrada else 'NAO cadastrada'}, "
+              f"login {'OK' if l.login_testado else 'falhou'}" + (f" ({l.observacao})" if l.observacao else ""))
+    return 0 if linhas and all(l.login_testado for l in linhas) else 3

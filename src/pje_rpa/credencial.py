@@ -35,6 +35,10 @@ DEFAULT_SELECTORS: dict[str, list[str]] = {
     # O SSO do PJe abre "Solicitar nova senha" como janela sobre a tela de login, onde o
     # formulario de login (#username, "Entrar") continua visivel: os campos e o botao da
     # recuperacao vem primeiro para o robo nao preencher/clicar no login por engano.
+    # Campo exclusivo da janela "Solicitar nova senha" do SSO (TJAP e outros): enquanto a janela
+    # ainda esta abrindo, o #username do login continua visivel atras dela e casaria primeiro.
+    "reset_cpf_dialog": ["css=input#login", "label=CPF/CNPJ"],
+    "reset_email_dialog": ["css=input#email"],
     "reset_cpf": [
         "css=input#login",
         "label=CPF/CNPJ",
@@ -149,11 +153,17 @@ def request_password_link(browser, config, cpf: str, email: str) -> StepResult:
     if not browser.visible("forgot_password_link", 8000):
         return _fail(browser, "Link 'Esqueceu a senha?' nao localizado")
     browser.click("forgot_password_link")
-    if not browser.visible("reset_cpf", 10000):
+    # Primeiro espera o campo da janela de recuperacao; so depois aceita os genericos
+    # (pagina propria de recuperacao, onde o login nao esta na tela).
+    if browser.visible("reset_cpf_dialog", 8000):
+        cpf_group, email_group = "reset_cpf_dialog", "reset_email_dialog"
+    elif browser.visible("reset_cpf", 5000):
+        cpf_group, email_group = "reset_cpf", "reset_email"
+    else:
         return _fail(browser, "Campo de CPF da recuperacao de senha nao localizado")
-    browser.fill("reset_cpf", "".join(ch for ch in cpf if ch.isdigit()))
-    if email and browser.visible("reset_email", 1500):
-        browser.fill("reset_email", email.strip())
+    browser.fill(cpf_group, "".join(ch for ch in cpf if ch.isdigit()))
+    if email and browser.visible(email_group, 1500):
+        browser.fill(email_group, email.strip())
     browser.click("reset_submit")
     if browser.visible("reset_confirmation", 15000):
         return StepResult(True, "Link de criacao de senha enviado ao e-mail cadastrado")

@@ -1,5 +1,5 @@
 param(
-    [Parameter(Mandatory = $true)][string]$Tribunal,
+    [Parameter(Mandatory = $true)][string[]]$Tribunal,
     [string]$Python = ".venv\Scripts\python.exe"
 )
 
@@ -8,8 +8,18 @@ $ProjectRoot = Split-Path -Parent $PSScriptRoot
 Set-Location -LiteralPath $ProjectRoot
 $env:PYTHONPATH = Join-Path $ProjectRoot "src"
 
-# Depois do cadastro: pede o link de senha (se ainda nao pediu), cadastra a senha com o
-# link recebido no e-mail e testa o login com CPF + senha + 2FA. Tudo e perguntado na hora.
-$Config = Join-Path "tribunais" ("{0}.toml" -f $Tribunal.ToLower())
-if (-not (Test-Path -LiteralPath $Config)) { throw "Tribunal '$Tribunal' nao configurado" }
-& $Python -m pje_rpa senha --config $Config
+# Depois do cadastro, para cada tribunal: pede o link de senha, le o link na caixa de e-mail
+# (ou recebe colado), gera uma senha forte, cadastra e testa CPF + senha + 2FA. No fim grava
+# entregas\credenciais-<data>.xlsx protegida por senha. Tudo sensivel e perguntado na hora.
+# Ex.: .\scripts\criar-senha.ps1 -Tribunal tjap,trt8
+$Configs = @()
+foreach ($t in @($Tribunal)) {
+    foreach ($name in ($t -split ",")) {
+        $name = $name.Trim()
+        if (-not $name) { continue }
+        $Config = Join-Path "tribunais" ("{0}.toml" -f $name.ToLower())
+        if (-not (Test-Path -LiteralPath $Config)) { throw "Tribunal $name nao configurado" }
+        $Configs += $Config
+    }
+}
+& $Python -m pje_rpa senha --config @Configs

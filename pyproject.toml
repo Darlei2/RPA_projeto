@@ -12,6 +12,7 @@ dependencies = ["cryptography>=42"]
 [project.optional-dependencies]
 browser = ["playwright>=1.50,<2"]
 signer = ["java-access-bridge-wrapper>=2,<3"]
+entrega = ["openpyxl>=3.1,<4", "msoffcrypto-tool>=5.4,<7"]
 dev = ["pytest>=8,<9"]
 
 [project.scripts]

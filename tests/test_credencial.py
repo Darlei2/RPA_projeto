@@ -26,7 +26,7 @@ PAGES = {
       <form action="/otp"><input id=username name=username><input id=password name=password type=password>
       <input id=kc-login type=submit value=Entrar></form>
       <input id=kc-pje-office type=button value="CERTIFICADO DIGITAL">
-      <button type=button onclick="document.getElementById('modal').style.display='block'">Solicitar nova senha</button>
+      <button type=button onclick="setTimeout(()=>{document.getElementById('modal').style.display='block'},800)">Solicitar nova senha</button>
       <div id=modal style="display:none"><h3>Solicitar nova senha</h3>
         <label for=login>CPF/CNPJ</label><input id=login name=login>
         <label for=email>Email</label><input id=email name=email type=email>

@@ -48,8 +48,10 @@ def build_parser() -> argparse.ArgumentParser:
     probe.add_argument("--config", type=Path, nargs="+", required=True)
 
     password = sub.add_parser("senha", help="Pede o link de senha, cadastra a senha e testa CPF + senha + 2FA")
-    password.add_argument("--config", type=Path, required=True)
+    password.add_argument("--config", type=Path, nargs="+", required=True)
     password.add_argument("--audit-root", type=Path, default=Path("runtime/audit"))
+    password.add_argument("--saida", type=Path, default=Path("entregas"),
+                          help="Pasta da planilha de entrega (protegida por senha)")
 
     report = sub.add_parser("relatorio", help="Resume os resultados por tribunal e confere a meta de validacao")
     report.add_argument("--audit-root", type=Path, default=Path("runtime/audit"))
@@ -92,7 +94,7 @@ def main(argv: list[str] | None = None) -> int:
             return 0 if not failures else 4
         if args.command == "senha":
             from .senha_cli import run_password_wizard
-            return run_password_wizard(load_config(args.config), args.audit_root)
+            return run_password_wizard([load_config(p) for p in args.config], args.audit_root, args.saida)
         if args.command == "relatorio":
             from .tribunais import format_relatorio, relatorio
             data = relatorio(args.audit_root, args.meta)
