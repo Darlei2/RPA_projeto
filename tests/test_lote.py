@@ -330,3 +330,14 @@ def test_real_com_tribunal_nao_liberado_segue_so_com_os_liberados(pasta, monkeyp
     texto = "\n".join(fake.log)
     assert "Envio real NAO liberado em: TJPE" in texto
     assert len(fake.cadastros) == 1 and fake.credenciais == ["52998224725"]
+
+
+def test_tribunal_com_hifen_no_nome_do_arquivo(tmp_path):
+    from pje_rpa.lote import OpcaoTribunal, escolher_tribunais
+
+    opcoes = [OpcaoTribunal("trf5-jef", tmp_path / "a.toml", "TRF5 - JEF 1o grau", False),
+              OpcaoTribunal("trf5-jef2g", tmp_path / "b.toml", "TRF5 - JEF Turmas Recursais", False),
+              OpcaoTribunal("trf1-2g", tmp_path / "c.toml", "TRF1 - 2o grau", False),
+              OpcaoTribunal("trf1", tmp_path / "d.toml", "TRF1 - 1o grau", False)]
+    escolhidos, invalidos = escolher_tribunais(opcoes, "trf5-jef, trf5-jef2g, trf1-2g, trf1")
+    assert [o.chave for o in escolhidos] == ["trf5-jef", "trf5-jef2g", "trf1-2g", "trf1"] and invalidos == []

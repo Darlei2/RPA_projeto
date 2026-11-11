@@ -56,7 +56,9 @@ def escolher_tribunal(opcoes: list[OpcaoTribunal], resposta: str) -> OpcaoTribun
         return opcoes[int(resposta) - 1]
     alvo = re.sub(r"[^a-z0-9]", "", resposta.casefold())
     for opcao in opcoes:
-        if alvo in (opcao.chave.casefold(), re.sub(r"[^a-z0-9]", "", opcao.nome.casefold())):
+        # nome do arquivo tambem sem hifen: "trf5-jef" e "trf5jef" valem o mesmo
+        if alvo in (re.sub(r"[^a-z0-9]", "", opcao.chave.casefold()),
+                    re.sub(r"[^a-z0-9]", "", opcao.nome.casefold())):
             return opcao
     candidatos = [o for o in opcoes if alvo and alvo in re.sub(r"[^a-z0-9]", "", o.nome.casefold())]
     return candidatos[0] if len(candidatos) == 1 else None
