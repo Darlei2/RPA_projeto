@@ -195,3 +195,47 @@ def test_senha_so_letras_e_numeros():
 def test_link_que_ja_estava_na_caixa_nao_e_usado():
     antigo = _msg(when=AGORA + timedelta(seconds=30))
     assert find_link_in_messages([antigo], AGORA, exclude=frozenset({LINK.replace("&amp;", "&")})) is None
+
+
+def test_pje_mostra_erro_mas_gravou_a_senha_o_login_confirma(tmp_path, monkeypatch):
+    """TRF5 Turmas Recursais: 'erroAtivarSenha' na tela, mas uma das senhas tentadas foi gravada."""
+    from types import SimpleNamespace
+
+    from pje_rpa import browser as browser_mod
+    from pje_rpa import senha_cli
+    from pje_rpa.credencial import StepResult
+
+    class FakeBrowser:
+        def __init__(self, config):
+            pass
+
+        def close(self):
+            pass
+
+    class FakeInbox:
+        def known_links(self):
+            return frozenset()
+
+        def wait_for_password_link(self, since, timeout_s, on_wait=None, exclude=frozenset()):
+            return "https://pje2g.trf5.jus.br/pje/Senha/ativacaoSenha.seam?codigo=x"
+
+    def fake_set(browser, config, link, *senhas):
+        r = StepResult(False, "O PJe recusou a senha (PJe: erroAtivarSenha)")
+        r.tried = ("primeira1", "segunda22")
+        return r
+
+    tentativas = []
+
+    def fake_login(browser, config, cpf, senha, code):
+        tentativas.append(senha)
+        return StepResult(senha == "segunda22", "login")
+
+    monkeypatch.setattr(browser_mod, "PlaywrightBrowser", FakeBrowser)
+    monkeypatch.setattr(senha_cli, "request_password_link", lambda *a: StepResult(True, "enviado"))
+    monkeypatch.setattr(senha_cli, "set_password", fake_set)
+    monkeypatch.setattr(senha_cli, "test_login", fake_login)
+    config = SimpleNamespace(tribunal="TRF5 - JEF Turmas Recursais", base_url="https://pje2g.trf5.jus.br/pje/login.seam")
+    lawyer = {"nome": "Fulano de Tal", "cpf": "01234567890", "email": "adv@gmail.com", "chave_2fa_exibir": "X"}
+    linha = senha_cli._one_tribunal(config, tmp_path / "audit", lawyer, FakeInbox(), "JBSWY3DPEHPK3PXP", pause=False)
+    assert linha.senha_cadastrada and linha.senha == "segunda22" and linha.login_testado
+    assert tentativas[:2] == ["primeira1", "segunda22"]

@@ -131,7 +131,18 @@ class PlaywrightBrowser(BrowserPort):
 
     def fill(self, group: str, value: str) -> None:
         locator = self._first_visible(group)
-        locator.fill(value)
+        try:
+            tag = locator.evaluate("e => e.tagName.toLowerCase()")
+            if tag not in ("input", "textarea", "select") and not locator.evaluate("e => e.isContentEditable"):
+                # O rotulo achou o painel (ex.: <div role=region aria-labelledby="Nova senha">):
+                # usa o campo dentro dele.
+                inner = locator.locator("input:not([type=hidden]):visible,textarea:visible").first
+                if inner.count():
+                    locator = inner
+            locator.fill(value)
+        except Exception as exc:  # noqa: BLE001
+            # Nunca repassar a mensagem do Playwright: ela traz o valor digitado (ex.: a senha).
+            raise BrowserError(f"Nao foi possivel preencher o campo '{group}' ({type(exc).__name__})") from None
 
     def read(self, group: str) -> str:
         try:

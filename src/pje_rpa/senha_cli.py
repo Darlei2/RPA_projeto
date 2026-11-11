@@ -220,6 +220,13 @@ def _passwords() -> tuple[str, str]:
     return gerar_senha(20, especiais=False), gerar_senha(16)
 
 
+def safe_error(exc: BaseException) -> str:
+    """Mensagem de erro sem segredos: o Playwright repete o valor digitado (fill("senha"))."""
+    text = str(exc).split("\n", 1)[0]
+    text = re.sub(r'fill\((["\']).*?\1\)', "fill(***)", text)
+    return f"{type(exc).__name__}: {text}"[:300]
+
+
 def _one_tribunal(config, audit_root: Path, lawyer: dict, inbox, secret_2fa: str,
                   pause: bool = True) -> LinhaCredencial:
     from .browser import PlaywrightBrowser
@@ -255,6 +262,20 @@ def _one_tribunal(config, audit_root: Path, lawyer: dict, inbox, secret_2fa: str
             return linha
         step = set_password(browser, config, link, *_passwords())
         link = ""
+        if not step.ok and not step.expired and step.tried:
+            # Alguns PJe (ex.: TRF5 Turmas Recursais) mostram erro mas gravam a senha: confere
+            # entrando com CPF + cada senha tentada + 2FA antes de desistir.
+            print(f"FALHA: {step.detail}")
+            print(f"Conferindo se o PJe gravou alguma das {len(step.tried)} senha(s) tentada(s) (login CPF + senha + 2FA)...")
+            for i, candidata in enumerate(step.tried, start=1):
+                teste = test_login(browser, config, lawyer["cpf"], candidata, _code_provider(secret_2fa))
+                audit.record("password_recheck", "CREDENTIAL", {"tentativa": i, "ok": teste.ok})
+                if teste.ok:
+                    print(f"  a senha {i} foi gravada apesar do erro do PJe")
+                    step = type(step)(True, "Senha cadastrada (o PJe mostrou erro, mas o login confirmou)", candidata)
+                    break
+            else:
+                print("  nenhuma das senhas tentadas entra: o PJe nao gravou.")
 
         password = step.value
         audit.record("password_set" if step.ok else "password_set_failed", "CREDENTIAL",
@@ -278,6 +299,15 @@ def _one_tribunal(config, audit_root: Path, lawyer: dict, inbox, secret_2fa: str
             linha.observacao = step.detail
             _report_failure(browser, audit, "login-senha", pause)
         status = "CREDENTIAL_OK" if step.ok else "CREDENTIAL_FAILED"
+        return linha
+    except Exception as exc:  # noqa: BLE001
+        # Erro inesperado: devolve o que ja tem (se a senha ja foi gravada, ela nao se perde).
+        linha.observacao = safe_error(exc)
+        print("FALHA: " + linha.observacao)
+        try:
+            _report_failure(browser, audit, "erro", pause)
+        except Exception:  # noqa: BLE001
+            pass
         return linha
     finally:
         audit.write_result({"run_id": audit.run_id, "kind": "credencial", "status": status,

@@ -89,12 +89,16 @@ DEFAULT_SELECTORS: dict[str, list[str]] = {
     # SSO (Keycloak) e pagina propria do PJe (ex.: TJAP /Senha/ativacaoSenha.seam, JSF).
     "new_password": [
         "css=#password-new", "css=input[name='password-new']",
-        "css=input[type='password'][id$=':senha']", "label=Digite a senha", "label=Nova senha",
+        "css=input[type='password'][id$=':senha']",
+        # TRT: painel "Nova senha" (RichFaces) com os dois campos de senha dentro
+        "css=[id*='NovaSenha' i] input[type='password'] >> nth=0",
+        "label=Digite a senha", "label=Nova senha",
     ],
     "confirm_password": [
         "css=#password-confirm",
         "css=input[name='password-confirm']",
         "css=input[type='password'][id$=':confirmacao']",
+        "css=[id*='NovaSenha' i] input[type='password'] >> nth=1",
         "label=Digite-a novamente",
         "label=Confirme a senha",
         "label=Confirmar senha",
@@ -138,6 +142,7 @@ class StepResult:
     value: str = ""  # ex.: a senha efetivamente aceita (nunca vai para log/auditoria)
     expired: bool = False  # link vencido/usado: pedir outro
     uncertain: bool = False  # o PJe pode ter gravado a senha em value
+    tried: tuple = ()  # senhas submetidas (o PJe pode ter gravado uma apesar do erro); nunca vai para log
 
 
 _REJECTED = re.compile(r"erro|inv[a\u00e1]lid|n[a\u00e3]o (confere|atende|permit|aceit)|deve|obrigat|m[i\u00ed]nim|m[a\u00e1]xim|caracter", re.I)
@@ -229,11 +234,14 @@ def set_password(browser, config, link: str, password: str, fallback_password: s
         return failed
     last = StepResult(False, "O PJe nao aceitou a nova senha")
     candidates = _fit_rule(browser, [p for p in (password, fallback_password) if p])
+    tried = []
     for candidate in candidates:
+        tried.append(candidate)
         last = _submit_password(browser, candidate)
         if last.ok or last.uncertain or last.expired or not browser.visible("new_password", 1000):
-            return last
+            break
         _close_dialog(browser)
+    last.tried = tuple(tried)
     return last
 
 
@@ -279,7 +287,20 @@ def _fit_rule(browser, candidates: list[str]) -> list[str]:
 
     lo, hi, alnum = rule
     size = max(lo, min(hi, 16))
-    return [gerar_senha(size, especiais=not alnum, permitir_curta=True)] + candidates
+    extra = [gerar_senha(size, especiais=not alnum, permitir_curta=True)]
+    if alnum:
+        # alguns PJe recusam maiusculas mesmo dizendo so "letras e numeros": uma so com minusculas
+        import secrets
+        rng = secrets.SystemRandom()
+        size2 = max(lo, min(hi, 12))
+        low = [rng.choice("abcdefghjkmnpqrstuvwxyz") for _ in range(size2 - 3)] + \
+              [rng.choice("23456789") for _ in range(3)]
+        rng.shuffle(low)
+        if not low[0].isalpha():
+            i = next(i for i, c in enumerate(low) if c.isalpha())
+            low[0], low[i] = low[i], low[0]
+        extra.append("".join(low))
+    return extra + candidates
 
 
 # Janelas de mensagem do PJe (RichFaces/JSF, Bootstrap) que aparecem por cima do formulario.

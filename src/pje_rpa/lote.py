@@ -304,8 +304,8 @@ def executar_lote(config: AppConfig, linhas: list, audit_root: Path, saida: Path
             except KeyboardInterrupt:
                 raise
             except Exception as exc:  # noqa: BLE001 - um advogado com problema nao para o lote
-                resultados.append(ResultadoAdvogado(linha.numero_linha, linha.nome, "ERROR",
-                                                    f"{type(exc).__name__}: {exc}"))
+                from .senha_cli import safe_error
+                resultados.append(ResultadoAdvogado(linha.numero_linha, linha.nome, "ERROR", safe_error(exc)))
     except KeyboardInterrupt:
         deps.log("\nInterrompido pelo operador: os advogados ja processados vao para a planilha.")
         if not entregar:

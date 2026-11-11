@@ -175,8 +175,46 @@ def test_regra_de_senha_da_tela_gera_senha_que_cumpre():
     padrao = [gerar_senha(20, especiais=False), gerar_senha(16)]  # 20 e longa; a de 16 tem simbolos
     escolhidas = _fit_rule(Navegador(), padrao)
     assert _fits(escolhidas[0], regra) and escolhidas[0].isalnum() and len(escolhidas[0]) == 16
-    assert escolhidas[1:] == padrao  # as originais continuam como reserva
+    assert escolhidas[-2:] == padrao  # as originais continuam como reserva
+    assert escolhidas[1].isalnum() and escolhidas[1] == escolhidas[1].lower() and _fits(escolhidas[1], regra)
 
     curta = password_rule("senha com tamanho entre 6 e 10 caracteres, letras e numeros")
     assert _fits(_fit_rule(type("N", (), {"page": type("P", (), {"inner_text": lambda s, a, timeout=0:
                  "senha com tamanho entre 6 e 10 caracteres, letras e numeros"})()})(), padrao)[0], curta)
+
+
+def test_erro_do_playwright_nunca_mostra_a_senha():
+    from pje_rpa.senha_cli import safe_error
+    exc = Exception('Locator.fill: Error: Element is not an <input>\nCall log:\n  - fill("n9wkcz8zWvLhU8GEiYsv")')
+    assert "n9wkcz8z" not in safe_error(exc)
+    assert "n9wkcz8z" not in safe_error(Exception('x fill("n9wkcz8zWvLhU8GEiYsv") y'))
+
+
+def test_rotulo_que_acha_o_painel_preenche_o_campo_de_dentro(tmp_path):
+    playwright = pytest.importorskip("playwright.sync_api")
+    from types import SimpleNamespace
+
+    from pje_rpa.browser import BrowserError, PlaywrightBrowser
+    html = """<html><body><div class=rich-mpnl><div id=panelNovaSenhaHeader>Nova senha</div>
+      <div role=region id=panelNovaSenhaContentDiv aria-labelledby=panelNovaSenhaHeader>
+      <input type=password id=a><input type=password id=b></div></div></body></html>"""
+    (tmp_path / "s.html").write_text(html, encoding="utf-8")
+    with playwright.sync_playwright() as pw:
+        try:
+            browser = pw.chromium.launch()
+        except Exception as exc:  # noqa: BLE001
+            pytest.skip(f"chromium indisponivel: {exc}")
+        page = browser.new_page()
+        page.goto((tmp_path / "s.html").as_uri())
+        b = PlaywrightBrowser.__new__(PlaywrightBrowser)
+        b.page = page
+        b.config = SimpleNamespace(selectors={"new_password": ["label=Nova senha"],
+                                              "confirm_password": ["css=[id*='NovaSenha' i] input[type='password'] >> nth=1"],
+                                              "nada": ["css=#naoexiste"]})
+        b.fill("new_password", "Segredo123")
+        b.fill("confirm_password", "Segredo123")
+        assert page.input_value("#a") == "Segredo123" and page.input_value("#b") == "Segredo123"
+        with pytest.raises(BrowserError) as err:
+            b.fill("nada", "Segredo123")
+        assert "Segredo123" not in str(err.value)
+        browser.close()
