@@ -40,7 +40,7 @@ confirm_data = ["role=button|name=Confirmar dados e prosseguir", "text=Confirmar
 commitment_term = ["text=Termo de compromisso", "text=informacoes sobre o uso do sistema"]
 sign_term = ["role=button|name=Assinar termo de compromisso", "text=Assinar termo de compromisso"]
 completion = ["text=Cadastro concluído com sucesso", "text=Cadastro concluido com sucesso", "text=cadastro foi concluído", "text=cadastro foi concluido", "text=cadastro concluido", "url=cadastroConcluido"]
-lawyer_panel = ["text=Painel do advogado", "text=Painel do usuario"]
+lawyer_panel = ["text=Painel do advogado", "text=Painel do usuario", "url=QuadroAviso", "url=/Painel/", "url=painel_usuario", "text=Quadro de avisos"]
 second_factor = ["css=input#otp", "css=input[name='otp']", "css=input[autocomplete='one-time-code']", "text=dois fatores", "text=segundo fator", "text=código de verificação", "text=codigo de verificacao", "text=código de autenticação", "text=codigo de autenticacao"]
 second_factor_input = ["css=input#otp", "css=input[name='otp']", "css=input[autocomplete='one-time-code']", "label=Código", "label=Codigo", "css=input[name*='codigo']", "css=input[name*='code']"]
 second_factor_submit = ["css=#kc-login", "role=button|name=Validar", "role=button|name=Confirmar", "role=button|name=Enviar", "role=button|name=Entrar"]
