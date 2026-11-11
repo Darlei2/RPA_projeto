@@ -183,6 +183,11 @@ cadastro com o A1 -> termo assinado -> "Solicitar nova senha" -> link do e-mail 
   Se preencher, proteja a planilha com senha no Excel; a pasta `planilhas\` nao vai para o Git.
 - `executar = N` pula a linha. Um advogado com erro nao para o lote.
 - Advogado ja cadastrado no tribunal: a senha so e trocada se o operador confirmar no inicio.
+- Caixa Gmail sem senha de app: preencha `email_senha` (senha do e-mail) e `email_2fa` (chave de 32
+  caracteres do 2FA do Gmail) na planilha. Na primeira vez o robo entra no Gmail pelo Edge, cria a senha
+  de app e guarda cifrada pelo Windows em `runtime\caixas-email.json` (so o mesmo usuario da mesma
+  maquina decifra). Nas proximas usa IMAP direto. Se o Google pedir captcha/celular, o robo pausa para o
+  operador (nada e contornado).
 - `-SoSenha`: para quem JA tem cadastro naqueles tribunais. Nao entra com o certificado (evita bloqueio
   por muitos logins seguidos) e vai direto para "Esqueci minha senha" + e-mail + nova senha + teste.
 

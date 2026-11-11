@@ -46,6 +46,8 @@ COLUNAS: dict[str, tuple[str, ...]] = {
     "imap_servidor": ("imap_servidor", "servidor_imap", "imap_host"),
     "imap_usuario": ("imap_usuario", "usuario_imap", "imap_user"),
     "imap_senha": ("imap_senha", "senha_imap", "senha_app_email", "senha_de_app"),
+    "email_senha": ("email_senha", "senha_email", "senha_do_email", "senha_gmail"),
+    "email_2fa": ("email_2fa", "chave_2fa_email", "2fa_email", "codigo_email", "codigo_2fa_email", "chave_gmail"),
     "executar": ("executar", "processar", "ativo"),
 }
 OBRIGATORIAS = ("nome", "cpf", "oab_numero", "oab_uf", "email", "telefone", "cep",
@@ -53,7 +55,7 @@ OBRIGATORIAS = ("nome", "cpf", "oab_numero", "oab_uf", "email", "telefone", "cep
 # Coluna "certificado": vazia ou "windows" = A1 ja instalado no Windows, achado pelo CPF da linha;
 # 40 caracteres hexadecimais = thumbprint de um certificado instalado; outro texto = caminho do .pfx.
 _THUMBPRINT = re.compile(r"^[0-9A-Fa-f]{40}$")
-SENSIVEIS = ("senha_certificado", "chave_2fa", "imap_senha")
+SENSIVEIS = ("senha_certificado", "chave_2fa", "imap_senha", "email_senha", "email_2fa")
 
 
 def _norm(text: str) -> str:
@@ -213,11 +215,12 @@ def gravar_modelo(destino: Path) -> Path:
     cabecalho = ["nome", "cpf", "oab_numero", "oab_uf", "email", "telefone", "cep", "logradouro",
                  "numero", "complemento", "bairro", "cidade", "uf", "rg_numero", "rg_orgao",
                  "rg_data_expedicao", "estado_civil", "autorizacao_ref", "certificado",
-                 "senha_certificado", "chave_2fa", "imap_servidor", "imap_usuario", "imap_senha", "executar"]
+                 "senha_certificado", "chave_2fa", "imap_servidor", "imap_usuario", "imap_senha", "email_senha",
+                 "email_2fa", "executar"]
     exemplo = ["ADVOGADO DE TESTE", "52998224725", "12345", "BA", "advogado@exemplo.com.br", "71999999999",
                "40000000", "RUA DE TESTE", "100", "", "CENTRO", "SALVADOR", "BA", "1234567", "SSP/BA",
                "20/03/2015", "solteiro(a)", "CONTRATO-123",
-               "", "", "", "imap.gmail.com", "", "", "N"]
+               "", "", "", "imap.gmail.com", "", "", "", "", "N"]
     wb = Workbook()
     ws = wb.active
     ws.title = "Advogados"
@@ -245,6 +248,8 @@ def gravar_modelo(destino: Path) -> Path:
         "senha_certificado: so para .pfx. chave_2fa, imap_senha: OPCIONAIS. Vazias = o robo pergunta na hora (recomendado).",
         "Se preencher colunas de senha, proteja o arquivo com senha no Excel (Arquivo > Informacoes > Proteger).",
         "imap_servidor/imap_usuario: caixa onde chega o link de senha do PJe (vazio = deduz pelo e-mail).",
+        "Gmail sem senha de app: preencha email_senha (senha do e-mail) e email_2fa (chave de 32 caracteres do 2FA do Gmail).",
+        "  Na 1a vez o robo entra no Gmail, gera a senha de app e guarda cifrada no Windows; depois usa IMAP.",
         "executar: N para pular a linha.",
     ):
         notas.append([texto])
