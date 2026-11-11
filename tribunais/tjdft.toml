@@ -1,0 +1,9 @@
+herda = "_comum.toml"
+
+# TJDFT 1o grau (TJDF-PJE-1G); confirme com scripts\sondar.ps1 -Tribunal tjdft
+# Libere o envio real (true/true) so depois de sondar + ensaio OK neste tribunal.
+[app]
+tribunal = "TJDFT - 1o grau"
+base_url = "https://pje.tjdft.jus.br/pje/login.seam"
+selectors_approved = false
+allow_live_submission = false
