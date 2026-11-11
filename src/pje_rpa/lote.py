@@ -233,6 +233,11 @@ def processar_advogado(config: AppConfig, linha, audit_root: Path, deps: Depende
     # 1) Cadastro com o certificado
     deps.log("1/2 Cadastro com o certificado A1" + (" (instalado no Windows)" if linha.usa_windows else " (.pfx)"))
     kwargs = {"rehearsal": rehearsal, "notify": deps.log, "thumbprint": linha.thumbprint}
+    if not rehearsal:
+        # Senha pelo login unico (PDPJ), sem e-mail, na mesma sessao do certificado; se o tribunal
+        # nao oferecer, o robo cai no caminho do e-mail ("Esqueci minha senha").
+        kwargs["senha_sso"] = True
+        kwargs["senha_sso_ja_cadastrado"] = nova_senha_se_ja_cadastrado
     if deps.extras.get("assistido"):
         kwargs["assist"] = lambda report: _assistente(report, deps, rehearsal)
     if deps.store_factory:
@@ -251,6 +256,19 @@ def processar_advogado(config: AppConfig, linha, audit_root: Path, deps: Depende
             res.motivo += " (senha nao alterada: opcao desligada)"
         return res
 
+    senha_sso = getattr(resultado, "senha", "")
+    if senha_sso:
+        deps.log("2/2 Credencial: senha criada pelo login unico (sem e-mail); teste de CPF + senha + 2FA")
+        testar = deps.extras.get("testar_senha")
+        if testar is None:
+            from .senha_cli import testar_credencial as testar
+        lawyer = {"nome": record.nome_esperado, "cpf": record.cpf_esperado, "email": record.email,
+                  "chave_2fa_exibir": secret_2fa if deps.extras.get("chave_na_planilha", True) else ""}
+        res.credencial = testar(config, audit_root, lawyer, secret_2fa, senha_sso)
+        senha_sso = ""
+        if res.credencial.login_testado:
+            return res
+        deps.log("  a senha do login unico nao passou no teste de login; tentando pelo e-mail")
     return _etapa_senha(config, linha, audit_root, deps, res, cache, secret_2fa)
 
 

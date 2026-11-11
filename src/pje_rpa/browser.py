@@ -6,7 +6,7 @@ from abc import ABC, abstractmethod
 from pathlib import Path
 from typing import Any
 
-from urllib.parse import urlparse
+from urllib.parse import parse_qs, urlparse
 
 from .models import AppConfig, LawyerRecord
 
@@ -111,6 +111,30 @@ class PlaywrightBrowser(BrowserPort):
         self.page = self._context.new_page()
         self.last_spec = ""  # ultimo seletor que casou (para a sondagem de tribunais)
         self.page.set_default_timeout(config.browser.timeout_ms)
+        # Login unico (PDPJ/Keycloak): guarda o pedido de autenticacao (cliente e retorno) e o
+        # resultado de acoes do proprio usuario (ex.: atualizar senha), sem guardar tokens.
+        self.sso_auth_url = ""
+        self.kc_action_status = ""
+        try:
+            self._context.on("request", self._note_request)
+        except Exception:
+            pass
+
+    def _note_request(self, request: Any) -> None:
+        try:
+            url = request.url
+            if "kc_action_status=" in url:
+                self.kc_action_status = (parse_qs(urlparse(url).query).get("kc_action_status") or [""])[0]
+            elif ("/protocol/openid-connect/auth" in url and "client_id=" in url
+                  and "kc_action=" not in url and not self.sso_auth_url):
+                parsed = urlparse(url)
+                query = parse_qs(parsed.query)
+                client = (query.get("client_id") or [""])[0]
+                redirect = (query.get("redirect_uri") or [""])[0]
+                if client and redirect:  # so o necessario (sem state/nonce)
+                    self.sso_auth_url = f"{parsed.scheme}://{parsed.netloc}{parsed.path}|{client}|{redirect}"
+        except Exception:
+            pass
 
     def open(self, url: str) -> None:
         self.page.goto(url, wait_until="domcontentloaded")

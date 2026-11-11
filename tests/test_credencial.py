@@ -258,3 +258,51 @@ def test_janela_do_proprio_formulario_de_senha_nao_e_mensagem(tmp_path):
         texto = _dialog_text(type("B", (), {"page": page})())
         assert "sucesso" in texto and "requisitos" not in texto
         browser.close()
+
+
+# ------------------------------------------- senha pelo login unico (PDPJ/Keycloak), sem e-mail
+KC_FORM = """<html><meta charset=utf-8><body><form id=f>
+ <input type=text id=username name=username value=x style="display:none">
+ <input type=password id=password name=password style="display:none">
+ <label for=password-new>Nova senha</label><input type=password id=password-new name=password-new>
+ <label for=password-confirm>Confirme a senha</label><input type=password id=password-confirm name=password-confirm>
+ <input type=checkbox id=logout-sessions checked>
+ <div id=erro class="alert-error" style="display:none"></div>
+ <button type=submit name=cancel-aia value=true>Cancelar</button><input type=submit value=Enviar>
+</form><script>
+document.getElementById('f').addEventListener('submit', e => {
+  e.preventDefault();
+  if (e.submitter && e.submitter.name === 'cancel-aia') { location = '/painel?kc_action_status=cancelled'; return; }
+  const a = document.getElementById('password-new').value, b = document.getElementById('password-confirm').value;
+  window.tentativas = (window.tentativas || 0) + 1;
+  if (a !== b || a.length > 16 || !/^[A-Za-z0-9]+$/.test(a)) {
+    const d = document.getElementById('erro'); d.style.display = '';
+    d.innerText = 'Senha invalida: use letras, numeros e tamanho entre 8 e 16 caracteres.';
+  } else { location = '/painel?kc_action_status=success'; }
+});</script></body></html>"""
+
+
+def test_senha_pelo_login_unico_sem_email(browser):
+    from urllib.parse import quote
+
+    from pje_rpa.credencial import set_password_via_sso
+    from pje_rpa.senha_forte import gerar_senha
+
+    def keycloak(route):
+        corpo = KC_FORM if "kc_action=UPDATE_PASSWORD" in route.request.url else "<html><body>login do SSO</body></html>"
+        route.fulfill(status=200, content_type="text/html; charset=utf-8", body=corpo)
+
+    browser._context.route(HOST + "/auth/**", keycloak)
+    # sem ter passado pelo SSO nesta sessao: nao tenta nada
+    assert not set_password_via_sso(browser, browser.config, "x" * 12).ok
+    browser.open(HOST + "/auth/realms/pje/protocol/openid-connect/auth?client_id=pje-teste-1g&state=abc&nonce=n"
+                 "&redirect_uri=" + quote(HOST + "/painel", safe=""))
+    assert browser.sso_auth_url.endswith("|pje-teste-1g|" + HOST + "/painel") and "abc" not in browser.sso_auth_url
+
+    primeira, reserva = gerar_senha(20, especiais=False), gerar_senha(16)  # 20 e longa; a reserva tem simbolos
+    step = set_password_via_sso(browser, browser.config, primeira, reserva)
+    assert step.ok, step.detail
+    assert step.value not in (primeira, reserva) and step.value.isalnum() and 8 <= len(step.value) <= 16
+    assert step.tried[:2] == (primeira, reserva) and step.tried[-1] == step.value
+    assert browser.kc_action_status == "success"
+    assert step.value not in step.detail

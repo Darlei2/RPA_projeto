@@ -7,7 +7,7 @@ do Windows, roda o fluxo do PJe e remove o certificado ao final, com a mesma lis
 from __future__ import annotations
 
 from collections.abc import Callable
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from urllib.parse import urlparse
 
@@ -23,6 +23,8 @@ class ResultadoCadastro:
     status: str          # COMPLETED, ALREADY_REGISTERED, REHEARSAL_OK, NEEDS_HUMAN, BLOCKED, FAILED, ERROR
     reason: str
     run_id: str = ""
+    senha: str = field(default="", repr=False)  # criada pelo login unico nesta sessao (nunca vai para log)
+    senha_detalhe: str = ""
 
 
 def pending_path(audit_root: Path) -> Path:
@@ -61,7 +63,7 @@ def limpar_pendentes(audit_root: Path, store, notify: Notify = print) -> None:
 def cadastrar(config: AppConfig, record: LawyerRecord, pfx: bytes | None, pfx_password: str,
               code_provider: Callable[[str], str | None], audit_root: Path, *,
               rehearsal: bool = False, notify: Notify = print, thumbprint: str = "",
-              assist=None,
+              assist=None, senha_sso: bool = False, senha_sso_ja_cadastrado: bool = False,
               store=None, browser_factory=None, signer_factory=None) -> ResultadoCadastro:
     """Roda o cadastro com o A1. Nao pede senha do PJe: isso e feito depois (credencial).
 
@@ -120,11 +122,30 @@ def cadastrar(config: AppConfig, record: LawyerRecord, pfx: bytes | None, pfx_pa
                                    code_provider=code_provider, rehearsal=rehearsal,
                                    request_password=False, assist=assist)
         result = flow.run()
+        # Senha pelo login unico (sem e-mail), aproveitando a sessao do certificado ainda aberta.
+        senha, senha_detalhe = "", ""
+        quer_senha = senha_sso and not rehearsal and (
+            result.status.value == "COMPLETED"
+            or (result.status.value == "ALREADY_REGISTERED" and senha_sso_ja_cadastrado))
+        if quer_senha:
+            from .credencial import set_password_via_sso
+            from .senha_cli import _passwords
+
+            try:
+                step = set_password_via_sso(browser, config, *_passwords())
+                senha, senha_detalhe = (step.value if step.ok else ""), step.detail
+            except Exception as exc:  # noqa: BLE001
+                senha_detalhe = f"falha na senha pelo login unico ({type(exc).__name__})"
+            audit.record("password_set_via_sso" if senha else "password_via_sso_unavailable",
+                         result.state.value, {"ok": bool(senha)})
+            notify(("  senha pelo login unico: OK - " if senha else "  senha pelo login unico: nao foi - ")
+                   + senha_detalhe)
         serialized = asdict(result)
         serialized["status"] = result.status.value
         serialized["state"] = result.state.value
         audit.write_result(serialized)
-        return ResultadoCadastro(result.status.value, result.reason, audit.run_id)
+        return ResultadoCadastro(result.status.value, result.reason, audit.run_id,
+                                 senha=senha, senha_detalhe=senha_detalhe)
     except (CertificateError, ConfigurationError) as exc:
         return ResultadoCadastro("ERROR", str(exc))
     except Exception as exc:  # noqa: BLE001

@@ -20,7 +20,7 @@ import re
 import time
 from dataclasses import dataclass
 from typing import Callable
-from urllib.parse import urlparse
+from urllib.parse import quote, urlparse
 
 # Candidatos genericos. O SSO do PJe (Keycloak, sso.cloud.pje.jus.br) e o mesmo em
 # quase todos os tribunais; os demais cobrem o login antigo (login.seam).
@@ -303,6 +303,80 @@ def _fit_rule(browser, candidates: list[str]) -> list[str]:
     return extra + candidates
 
 
+def set_password_via_sso(browser, config, password: str, fallback_password: str | None = None) -> StepResult:
+    """Senha pelo login unico (PDPJ/Keycloak), SEM e-mail.
+
+    Com o advogado ja autenticado nesta sessao pelo proprio certificado + 2FA, abre a acao padrao
+    do Keycloak para o usuario logado atualizar a senha (kc_action=UPDATE_PASSWORD), preenche
+    "Nova senha" / "Confirme a senha" e envia. Quem chama deve testar o login com CPF + senha + 2FA.
+    """
+    page = getattr(browser, "page", None)
+    origem = getattr(browser, "sso_auth_url", "")
+    if page is None or origem.count("|") != 2:
+        return StepResult(False, "Este tribunal nao passou pelo login unico (SSO) nesta sessao")
+    endpoint, client, redirect = origem.split("|")
+    host = (urlparse(endpoint).hostname or "").lower()
+    if urlparse(endpoint).scheme != "https" or not host.endswith(".jus.br"):
+        return StepResult(False, "O login unico nao e um endereco https .jus.br")
+    url = (f"{endpoint}?client_id={quote(client, safe='')}&redirect_uri={quote(redirect, safe='')}"
+           "&response_type=code&scope=openid&kc_action=UPDATE_PASSWORD")
+    browser.kc_action_status = ""
+    novo, confirma = page.locator("#password-new"), page.locator("#password-confirm")
+    try:
+        page.goto(url, timeout=30000)
+        novo.wait_for(state="visible", timeout=15000)
+    except Exception:  # noqa: BLE001
+        status = getattr(browser, "kc_action_status", "")
+        return StepResult(False, "O login unico nao ofereceu a troca de senha"
+                          + (f" (resposta: {status})" if status else ""))
+    candidates = _fit_rule(browser, [p for p in (password, fallback_password) if p])
+    tried: list[str] = []
+    last = StepResult(False, "O login unico nao aceitou a nova senha")
+    while candidates:
+        candidate = candidates.pop(0)
+        tried.append(candidate)
+        try:
+            novo.fill(candidate, timeout=5000)
+            if confirma.count():
+                confirma.fill(candidate, timeout=5000)
+            page.locator("form input[type=submit]:not([name='cancel-aia']), "
+                         "form button[type=submit]:not([name='cancel-aia'])").first.click(timeout=5000)
+        except Exception as exc:  # noqa: BLE001 - a mensagem do Playwright traz o valor digitado
+            last = StepResult(False, f"Nao foi possivel enviar a nova senha no login unico ({type(exc).__name__})")
+            break
+        deadline = time.monotonic() + 20
+        rejected = False
+        while time.monotonic() < deadline:
+            status = getattr(browser, "kc_action_status", "")
+            if status == "success":
+                last = StepResult(True, "Senha cadastrada pelo login unico (sem e-mail)", candidate)
+                break
+            if status:
+                last = StepResult(False, f"O login unico nao concluiu a troca de senha ({status})")
+                break
+            try:
+                on_form = novo.is_visible()
+            except Exception:  # noqa: BLE001 - pagina navegando
+                on_form = False
+            if on_form:
+                messages = _messages(browser)
+                if messages:
+                    last = StepResult(False, "O login unico recusou a senha: " + " | ".join(messages))
+                    rejected = True
+                    break
+            elif (urlparse(_url(browser)).hostname or "").lower() != host:
+                # voltou ao tribunal sem o aviso de sucesso: o teste de login decide
+                last = StepResult(True, "Senha enviada ao login unico (sem e-mail)", candidate)
+                break
+            page.wait_for_timeout(400)
+        if not rejected:
+            break
+        # a mensagem de recusa pode trazer a regra (tamanho, tipo): gera uma senha que a cumpra
+        candidates += [c for c in _fit_rule(browser, []) if c not in tried and c not in candidates]
+    last.tried = tuple(tried)
+    return last
+
+
 # Janelas de mensagem do PJe (RichFaces/JSF, Bootstrap) que aparecem por cima do formulario.
 JS_DIALOG_TEXT = r"""() => {
   const vis = e => !!(e.getClientRects().length) && getComputedStyle(e).visibility !== 'hidden'
@@ -462,7 +536,11 @@ def test_login(browser, config, cpf: str, password: str,
         if not code:
             return StepResult(False, "Codigo do 2FA nao informado")
         browser.fill("second_factor_input", code.strip())
-        browser.click("second_factor_submit")
+        try:
+            browser.click("second_factor_submit")
+        except Exception:  # noqa: BLE001 - a tela pode enviar sozinha ao completar o codigo
+            if browser.visible("second_factor_input", 1000):
+                raise
         if not browser.wait_hidden("second_factor_input", 20000):
             return _fail(browser, "Codigo do 2FA recusado")
     else:

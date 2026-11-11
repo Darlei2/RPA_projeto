@@ -111,7 +111,13 @@ class PJeRegistrationFlow:
             if not code:
                 return self._needs_human("Codigo de segundo fator nao informado a tempo")
             self.browser.fill("second_factor_input", code.strip())
-            self.browser.click("second_factor_submit")
+            try:
+                self.browser.click("second_factor_submit")
+            except Exception:
+                # A tela do 2FA pode enviar sozinha ao completar o codigo: o botao some no meio do
+                # clique. Se o campo do codigo ja saiu da tela, o login seguiu.
+                if self.browser.visible("second_factor_input", 1000):
+                    raise
             if isinstance(self.browser, SimulatedBrowser):
                 self.browser.human_completed_second_factor()
             if not self.browser.wait_hidden("second_factor_input", LOGIN_TIMEOUT_MS):

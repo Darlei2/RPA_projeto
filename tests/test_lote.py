@@ -381,3 +381,32 @@ def test_modo_real_nao_exige_referencia_de_autorizacao(pasta):
     config = dataclasses.replace(_config(), selectors_approved=True, allow_live_submission=True)
     assert_live_ready(config, record)       # nao levanta erro
     assert_rehearsal_ready(config, record)
+
+
+def test_senha_pelo_login_unico_dispensa_o_email(pasta):
+    """Cadastro devolve a senha criada pelo login unico: so testa o login, sem abrir a caixa de e-mail."""
+    linhas = ler_planilha(_xlsx(pasta / "a.xlsx", [_linha()]))
+    fake = Fake()
+    deps = fake.deps()
+    pedidos = []
+
+    def cadastrar(config, record, pfx, pwd, code_provider, audit_root, **kw):
+        pedidos.append((kw.get("senha_sso"), kw.get("senha_sso_ja_cadastrado")))
+        return ResultadoCadastro("COMPLETED", "ok", "run", senha="SenhaDoSSO123")
+
+    testadas = []
+
+    def testar(config, audit_root, lawyer, secret_2fa, senha):
+        testadas.append(senha)
+        linha = LinhaCredencial(config.tribunal, config.base_url, lawyer["nome"], lawyer["cpf"], lawyer["email"])
+        linha.senha, linha.senha_cadastrada, linha.login_testado = senha, True, True
+        return linha
+
+    deps.cadastrar = cadastrar
+    deps.abrir_caixa = lambda *a, **k: (_ for _ in ()).throw(AssertionError("nao deveria abrir a caixa de e-mail"))
+    deps.extras["testar_senha"] = testar
+    res = executar_lote(_config(), linhas, pasta / "audit", pasta / "out", deps,
+                        rehearsal=False, nova_senha_se_ja_cadastrado=True)
+    assert pedidos == [(True, True)] and testadas == ["SenhaDoSSO123"]
+    assert res[0].login_ok and fake.credenciais == []  # o caminho do e-mail nao foi usado
+    assert "SenhaDoSSO123" not in repr(ResultadoCadastro("COMPLETED", "ok", "run", senha="SenhaDoSSO123"))

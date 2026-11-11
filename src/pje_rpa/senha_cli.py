@@ -36,14 +36,23 @@ def _yes(prompt: str, default: bool = False) -> bool:
     return default if not answer else answer in {"s", "sim", "y"}
 
 
+_ULTIMO_TOTP = {"codigo": ""}
+
+
 def _code_provider(secret: str):
     def provide(message: str) -> str | None:
         if not secret:
             return _ask(f"{message}: ") or None
         if 30 - (time.time() % 30) < 8:  # evita codigo prestes a expirar
             time.sleep(30 - (time.time() % 30) + 0.3)
+        codigo = gerar_totp(secret)
+        if codigo == _ULTIMO_TOTP["codigo"]:
+            # O login unico nao aceita o mesmo codigo duas vezes: espera o proximo.
+            time.sleep(30 - (time.time() % 30) + 0.5)
+            codigo = gerar_totp(secret)
+        _ULTIMO_TOTP["codigo"] = codigo
         print("Codigo TOTP gerado localmente")
-        return gerar_totp(secret)
+        return codigo
     return provide
 
 
@@ -317,6 +326,42 @@ def _one_tribunal(config, audit_root: Path, lawyer: dict, inbox, secret_2fa: str
             browser.close()
         except Exception:  # noqa: BLE001
             pass
+
+
+def testar_credencial(config, audit_root: Path, lawyer: dict, secret_2fa: str, senha: str) -> LinhaCredencial:
+    """Senha ja criada (ex.: pelo login unico, sem e-mail): so testa CPF + senha + 2FA."""
+    from .browser import PlaywrightBrowser
+
+    print(f"\n== {config.tribunal} ==")
+    linha = LinhaCredencial(config.tribunal, config.base_url, lawyer["nome"], lawyer["cpf"], lawyer["email"],
+                            chave_2fa=lawyer["chave_2fa_exibir"])
+    linha.senha, linha.senha_cadastrada = senha, True
+    audit = AuditLog(audit_root)
+    audit.record("credential_test_started", "CREDENTIAL", {"tribunal": config.tribunal, "origem": "login unico"})
+    status = "CREDENTIAL_FAILED"
+    browser = None
+    try:
+        browser = PlaywrightBrowser(config)
+        step = test_login(browser, config, lawyer["cpf"], senha, _code_provider(secret_2fa))
+        audit.record("password_login_tested", "CREDENTIAL", {"ok": step.ok})
+        print(("OK: " if step.ok else "FALHA: ") + step.detail)
+        linha.login_testado = step.ok
+        if not step.ok:
+            linha.observacao = step.detail
+            _report_failure(browser, audit, "login-senha", False)
+        status = "CREDENTIAL_OK" if step.ok else "CREDENTIAL_FAILED"
+    except Exception as exc:  # noqa: BLE001
+        linha.observacao = safe_error(exc)
+        print("FALHA: " + linha.observacao)
+    finally:
+        audit.write_result({"run_id": audit.run_id, "kind": "credencial", "status": status,
+                            "reason": linha.observacao or "ok", "details": {"tribunal": config.tribunal}})
+        try:
+            if browser is not None:
+                browser.close()
+        except Exception:  # noqa: BLE001
+            pass
+    return linha
 
 
 def _deliver(linhas: list[LinhaCredencial], output_dir: Path) -> None:
