@@ -268,7 +268,18 @@ def processar_advogado(config: AppConfig, linha, audit_root: Path, deps: Depende
         senha_sso = ""
         if res.credencial.login_testado:
             return res
-        deps.log("  a senha do login unico nao passou no teste de login; tentando pelo e-mail")
+        deps.log("  a senha do login unico nao passou no teste de login")
+    if deps.extras.get("sem_email"):
+        # Execucao sem intervencao: nao cai no "Esqueci minha senha" (depende da caixa de e-mail).
+        detalhe = getattr(resultado, "senha_detalhe", "") or "login unico indisponivel"
+        if res.credencial is not None and not res.credencial.login_testado:
+            # a senha foi enviada ao login unico mas o teste falhou: vai para a planilha protegida
+            # como "nao testada" (nao se perde) e nao sobe como credencial pronta
+            detalhe = "senha criada, mas o login de teste falhou: " + (res.credencial.observacao or "")
+        res.motivo += f" | SENHA PENDENTE: {detalhe}"
+        deps.log(f"2/2 Credencial: senha pendente ({detalhe}). E-mail desligado nesta execucao.")
+        return res
+    deps.log("  tentando pelo e-mail")
     return _etapa_senha(config, linha, audit_root, deps, res, cache, secret_2fa)
 
 

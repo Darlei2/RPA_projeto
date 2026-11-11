@@ -175,3 +175,41 @@ def test_lote_confere_os_certificados_antes_de_comecar(tmp_path, monkeypatch):
     deps.store_factory = lambda: FakeStore(_installed(_cert("JOSE SOUZA", OUTRO_CPF)))
     assert run_executar(tmp_path / "audit", tmp_path / "out", ensaio=True, deps=deps) == 2
     assert "Nenhum certificado valido" in "\n".join(fake.log) and not fake.cadastros
+
+
+def test_sessao_do_login_unico_cai_depois_do_cadastro_robo_entra_de_novo(tmp_path, monkeypatch):
+    """Cadastro concluido, mas o SSO pede login de novo: o robo reentra com o certificado
+    (so confere que ja e cadastrado) e cria a senha na segunda tentativa."""
+    from pje_rpa import credencial
+    from pje_rpa.browser import SimulatedBrowser
+    from pje_rpa.credencial import StepResult
+    from pje_rpa.execucao import cadastrar
+    from pje_rpa.signer import SimulatedSigner
+
+    class Navegador(SimulatedBrowser):
+        def reset_session(self):
+            self.stage = "closed"
+
+    config = dataclasses.replace(load_config(PROJECT / "tribunais" / "tjap.toml"),
+                                 selectors_approved=True, allow_live_submission=True)
+    linha = ler_planilha(_planilha(tmp_path, ""))[0]
+    store = FakeStore(_installed(_cert("MARIA DA SILVA", CPF)))
+    nav = Navegador(linha.record)
+    chamadas, mensagens = [], []
+
+    def falso_sso(browser, cfg, senha, reserva=None):
+        chamadas.append(browser.stage)
+        if len(chamadas) == 1:
+            browser.page = None                       # (no robo real o navegador tem pagina)
+            browser.scenario = "already_registered"   # agora o advogado ja esta cadastrado
+            return StepResult(False, "A sessao do login unico nao esta mais ativa")
+        return StepResult(True, "Senha cadastrada pelo login unico (sem e-mail)", "SenhaNova123")
+
+    monkeypatch.setattr(credencial, "set_password_via_sso", falso_sso)
+    res = cadastrar(config, linha.record, None, "", lambda m: "000000", tmp_path / "audit", store=store,
+                    browser_factory=lambda cfg: nav, signer_factory=lambda cfg: SimulatedSigner(nav),
+                    notify=mensagens.append, senha_sso=True)
+    assert res.status == "COMPLETED" and res.senha == "SenhaNova123", (res, mensagens)
+    assert len(chamadas) == 2
+    assert any("entrando de novo com o certificado" in m for m in mensagens)
+    assert "SenhaNova123" not in " ".join(mensagens)

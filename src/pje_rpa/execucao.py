@@ -131,11 +131,31 @@ def cadastrar(config: AppConfig, record: LawyerRecord, pfx: bytes | None, pfx_pa
             from .credencial import set_password_via_sso
             from .senha_cli import _passwords
 
-            try:
-                step = set_password_via_sso(browser, config, *_passwords())
-                senha, senha_detalhe = (step.value if step.ok else ""), step.detail
-            except Exception as exc:  # noqa: BLE001
-                senha_detalhe = f"falha na senha pelo login unico ({type(exc).__name__})"
+            def tentar_senha() -> None:
+                nonlocal senha, senha_detalhe
+                try:
+                    step = set_password_via_sso(browser, config, *_passwords())
+                    senha, senha_detalhe = (step.value if step.ok else ""), step.detail
+                except Exception as exc:  # noqa: BLE001
+                    senha_detalhe = f"falha na senha pelo login unico ({type(exc).__name__})"
+
+            tentar_senha()
+            if not senha and result.status.value == "COMPLETED" and hasattr(browser, "page"):
+                # Depois de concluir o cadastro o PJe pode encerrar a sessao do login unico. Entra de
+                # novo com o certificado (so confere que ja e cadastrado; nada e enviado) e tenta outra vez.
+                notify("  senha pelo login unico: " + senha_detalhe)
+                notify("  entrando de novo com o certificado para criar a senha")
+                try:
+                    browser.reset_session()
+                    relogin = PJeRegistrationFlow(config, record, info, pfx_password, browser,
+                                                  signer_factory(config), audit, code_provider=code_provider,
+                                                  rehearsal=True, request_password=False).run()
+                    if relogin.status.value == "ALREADY_REGISTERED":
+                        tentar_senha()
+                    else:
+                        senha_detalhe = f"novo login nao chegou ao painel ({relogin.status.value})"
+                except Exception as exc:  # noqa: BLE001
+                    senha_detalhe = f"falha no novo login para criar a senha ({type(exc).__name__})"
             audit.record("password_set_via_sso" if senha else "password_via_sso_unavailable",
                          result.state.value, {"ok": bool(senha)})
             notify(("  senha pelo login unico: OK - " if senha else "  senha pelo login unico: nao foi - ")

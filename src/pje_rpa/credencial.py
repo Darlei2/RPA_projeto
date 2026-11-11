@@ -323,12 +323,38 @@ def set_password_via_sso(browser, config, password: str, fallback_password: str 
     browser.kc_action_status = ""
     novo, confirma = page.locator("#password-new"), page.locator("#password-confirm")
     try:
-        page.goto(url, timeout=30000)
-        novo.wait_for(state="visible", timeout=15000)
-    except Exception:  # noqa: BLE001
+        page.goto(url, timeout=30000, wait_until="domcontentloaded")
+    except Exception:  # noqa: BLE001 - redirecionamentos em cadeia: o que vale e a tela que ficar
+        pass
+    deadline = time.monotonic() + 20
+    offered = False
+    while time.monotonic() < deadline and not offered:
+        try:
+            offered = novo.is_visible()
+        except Exception:  # noqa: BLE001
+            offered = False
+        if offered or getattr(browser, "kc_action_status", ""):
+            break
+        try:
+            # tela de login do SSO (CPF/senha ou certificado): a sessao do login unico acabou
+            if page.locator("#kc-pje-office, #kc-login, input#username:visible").first.is_visible():
+                failed = StepResult(False, "A sessao do login unico nao esta mais ativa (pediu login de novo)")
+                failed.expired = True
+                return failed
+        except Exception:  # noqa: BLE001
+            pass
+        page.wait_for_timeout(400)
+    if not offered:
         status = getattr(browser, "kc_action_status", "")
+        where = ""
+        try:
+            parsed = urlparse(page.url)
+            buttons = (browser.outline().get("buttons") or [])[:5] if hasattr(browser, "outline") else []
+            where = f" (tela: {parsed.netloc}{parsed.path}" + (f"; botoes: {', '.join(buttons)}" if buttons else "") + ")"
+        except Exception:  # noqa: BLE001
+            pass
         return StepResult(False, "O login unico nao ofereceu a troca de senha"
-                          + (f" (resposta: {status})" if status else ""))
+                          + (f" (resposta: {status})" if status else "") + where)
     candidates = _fit_rule(browser, [p for p in (password, fallback_password) if p])
     tried: list[str] = []
     last = StepResult(False, "O login unico nao aceitou a nova senha")

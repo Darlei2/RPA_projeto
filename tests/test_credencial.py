@@ -299,6 +299,13 @@ def test_senha_pelo_login_unico_sem_email(browser):
                  "&redirect_uri=" + quote(HOST + "/painel", safe=""))
     assert browser.sso_auth_url.endswith("|pje-teste-1g|" + HOST + "/painel") and "abc" not in browser.sso_auth_url
 
+    # sessao do login unico encerrada: o SSO mostra o login em vez da troca de senha
+    browser._context.route(HOST + "/auth/**", lambda route: route.fulfill(
+        status=200, content_type="text/html", body="<html><body><input id=username><button id=kc-login>Entrar</button></body></html>"))
+    caiu = set_password_via_sso(browser, browser.config, "x" * 12)
+    assert not caiu.ok and caiu.expired and "nao esta mais ativa" in caiu.detail
+    browser._context.route(HOST + "/auth/**", keycloak)
+
     primeira, reserva = gerar_senha(20, especiais=False), gerar_senha(16)  # 20 e longa; a reserva tem simbolos
     step = set_password_via_sso(browser, browser.config, primeira, reserva)
     assert step.ok, step.detail

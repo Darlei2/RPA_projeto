@@ -410,3 +410,17 @@ def test_senha_pelo_login_unico_dispensa_o_email(pasta):
     assert pedidos == [(True, True)] and testadas == ["SenhaDoSSO123"]
     assert res[0].login_ok and fake.credenciais == []  # o caminho do e-mail nao foi usado
     assert "SenhaDoSSO123" not in repr(ResultadoCadastro("COMPLETED", "ok", "run", senha="SenhaDoSSO123"))
+
+
+def test_sem_email_nao_cai_no_esqueci_minha_senha(pasta):
+    """Execucao sem intervencao: se a senha pelo login unico nao sair, registra pendencia e segue."""
+    linhas = ler_planilha(_xlsx(pasta / "a.xlsx", [_linha()]))
+    fake = Fake()
+    deps = fake.deps()
+    deps.cadastrar = lambda *a, **k: ResultadoCadastro("COMPLETED", "ok", "run", senha_detalhe="nao ofereceu")
+    deps.abrir_caixa = lambda *a, **k: (_ for _ in ()).throw(AssertionError("nao deveria abrir a caixa de e-mail"))
+    deps.extras["sem_email"] = True
+    res = executar_lote(_config(), linhas, pasta / "audit", pasta / "out", deps,
+                        rehearsal=False, nova_senha_se_ja_cadastrado=False)
+    assert res[0].cadastro == "COMPLETED" and not res[0].login_ok
+    assert "SENHA PENDENTE: nao ofereceu" in res[0].motivo and fake.credenciais == []
