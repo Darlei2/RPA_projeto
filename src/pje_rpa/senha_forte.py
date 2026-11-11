@@ -12,12 +12,13 @@ DIGITS = "23456789"
 SPECIAL = "@#$%&*!?-_"
 
 
-def gerar_senha(tamanho: int = 16, especiais: bool = True) -> str:
+def gerar_senha(tamanho: int = 16, especiais: bool = True, permitir_curta: bool = False) -> str:
     """Pelo menos 2 de cada classe (maiuscula, minuscula, numero e, se pedido, especial).
 
     Sem especiais (ex.: o TJAP aceita so letras e numeros) use 20 caracteres: continua forte.
     """
-    if tamanho < 12:
+    # permitir_curta: so quando o proprio PJe limita o tamanho (ex.: "entre 8 e 10 caracteres")
+    if tamanho < (8 if permitir_curta else 12):
         raise ValueError("Use pelo menos 12 caracteres")
     groups = (UPPER, LOWER, DIGITS, SPECIAL) if especiais else (UPPER, LOWER, DIGITS)
     rng = secrets.SystemRandom()

@@ -224,12 +224,58 @@ def set_password(browser, config, link: str, password: str, fallback_password: s
         failed.expired = True
         return failed
     last = StepResult(False, "O PJe nao aceitou a nova senha")
-    for candidate in [p for p in (password, fallback_password) if p]:
+    candidates = _fit_rule(browser, [p for p in (password, fallback_password) if p])
+    for candidate in candidates:
         last = _submit_password(browser, candidate)
         if last.ok or last.uncertain or last.expired or not browser.visible("new_password", 1000):
             return last
         _close_dialog(browser)
     return last
+
+
+def password_rule(text: str) -> tuple[int, int, bool] | None:
+    """Regra escrita na tela de nova senha. Ex. (TRF5 Turmas Recursais): "insira uma nova senha
+    contendo letras, numeros e tamanho entre 8 e 16 caracteres" -> (8, 16, True=so letras e numeros)."""
+    t = " ".join((text or "").split())
+    m = re.search(r"entre\s*(\d{1,2})\s*e\s*(\d{1,2})\s*caracteres", t, re.I)
+    lo = hi = None
+    if m:
+        lo, hi = int(m.group(1)), int(m.group(2))
+    else:
+        mn = re.search(r"m[i\u00ed]nimo\s*(?:de)?\s*(\d{1,2})\s*caracteres", t, re.I)
+        mx = re.search(r"m[a\u00e1]ximo\s*(?:de)?\s*(\d{1,2})\s*caracteres", t, re.I)
+        lo, hi = (int(mn.group(1)) if mn else None), (int(mx.group(1)) if mx else None)
+    alnum = bool(re.search(r"letras\s*(?:,|e)\s*n[u\u00fa]meros", t, re.I)) and not re.search(
+        r"especia|s[i\u00ed]mbolo|caractere especial", t, re.I)
+    if lo is None and hi is None and not alnum:
+        return None
+    return (lo or 1, hi or 64, alnum)
+
+
+def _fits(password: str, rule: tuple[int, int, bool]) -> bool:
+    lo, hi, alnum = rule
+    return lo <= len(password) <= hi and (password.isalnum() or not alnum)
+
+
+def _fit_rule(browser, candidates: list[str]) -> list[str]:
+    """Se a tela diz o tamanho/tipo de senha aceito, garante uma senha que cumpre a regra."""
+    page = getattr(browser, "page", None)
+    if page is None:
+        return candidates
+    try:
+        rule = password_rule(page.inner_text("body", timeout=3000))
+    except Exception:  # noqa: BLE001
+        return candidates
+    if rule is None:
+        return candidates
+    ok = [p for p in candidates if _fits(p, rule)]
+    if ok:
+        return ok + [p for p in candidates if p not in ok]
+    from .senha_forte import gerar_senha
+
+    lo, hi, alnum = rule
+    size = max(lo, min(hi, 16))
+    return [gerar_senha(size, especiais=not alnum, permitir_curta=True)] + candidates
 
 
 # Janelas de mensagem do PJe (RichFaces/JSF, Bootstrap) que aparecem por cima do formulario.

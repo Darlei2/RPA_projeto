@@ -152,3 +152,31 @@ def test_janela_de_mensagem_do_tjap_usuario_nao_localizado(browser):
     """Link antigo: o TJAP abre a tela, mas responde 'Usuario nao localizado' -> pedir link novo."""
     step = set_password(browser, browser.config, HOST + "/ativacao-modal?velho=1", "Ab3xY9kLm2pQrT7uV8wZ")
     assert not step.ok and step.expired, step.detail
+
+
+# ------------------------------------------- regra de senha escrita na tela (TRF5 Turmas Recursais)
+def test_regra_de_senha_da_tela_gera_senha_que_cumpre():
+    from pje_rpa.credencial import _fit_rule, _fits, password_rule
+    from pje_rpa.senha_forte import gerar_senha
+
+    texto = ("Prezado(a) FULANA, para ativar seu cadastro, insira uma nova senha contendo letras, "
+             "numeros e tamanho entre 8 e 16 caracteres.")
+    regra = password_rule(texto)
+    assert regra == (8, 16, True)
+    assert password_rule("Digite a senha  Digite-a novamente") is None
+
+    class Pagina:
+        def inner_text(self, sel, timeout=0):
+            return texto
+
+    class Navegador:
+        page = Pagina()
+
+    padrao = [gerar_senha(20, especiais=False), gerar_senha(16)]  # 20 e longa; a de 16 tem simbolos
+    escolhidas = _fit_rule(Navegador(), padrao)
+    assert _fits(escolhidas[0], regra) and escolhidas[0].isalnum() and len(escolhidas[0]) == 16
+    assert escolhidas[1:] == padrao  # as originais continuam como reserva
+
+    curta = password_rule("senha com tamanho entre 6 e 10 caracteres, letras e numeros")
+    assert _fits(_fit_rule(type("N", (), {"page": type("P", (), {"inner_text": lambda s, a, timeout=0:
+                 "senha com tamanho entre 6 e 10 caracteres, letras e numeros"})()})(), padrao)[0], curta)
