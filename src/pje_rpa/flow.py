@@ -99,7 +99,7 @@ class PJeRegistrationFlow:
             return self._failed("Login por certificado nao concluiu: o PJe continuou na tela de login")
         self.audit.record("login_page_left", self.state.value)
 
-        if blocked := self._blocked_reason():
+        if blocked := self._post_login_blocked():
             return self._blocked(blocked)
 
         if self.browser.visible("second_factor", 8000):
@@ -116,7 +116,7 @@ class PJeRegistrationFlow:
             if not self.browser.wait_hidden("second_factor_input", LOGIN_TIMEOUT_MS):
                 return self._needs_human("Codigo de segundo fator recusado ou expirado")
             self.audit.record("second_factor_accepted", self.state.value)
-            if blocked := self._blocked_reason():
+            if blocked := self._post_login_blocked():
                 return self._blocked(blocked)
 
         if self.browser.visible("lawyer_panel", 2500):
@@ -330,7 +330,15 @@ class PJeRegistrationFlow:
         self.audit.record("identity_validated", self.state.value, self.record.safe_summary())
         return None
 
-    def _blocked_reason(self) -> str | None:
+    def _post_login_blocked(self) -> str | None:
+        """Depois do login: no painel/Quadro de Avisos de quem ja e usuario, os avisos do tribunal
+        podem citar "jus postulandi" (ex.: TRF6). Ali esse texto nao indica o perfil da pessoa."""
+        on_panel = self.browser.visible("lawyer_panel", 1500)
+        if on_panel:
+            self.audit.record("existing_panel_seen", self.state.value)
+        return self._blocked_reason(skip=("jus_postulandi",) if on_panel else ())
+
+    def _blocked_reason(self, skip: tuple[str, ...] = ()) -> str | None:
         labels = {
             "captcha": "CAPTCHA detectado; nenhuma tentativa de contorno foi realizada",
             "certificate_error": "Erro ou bloqueio de certificado detectado",
@@ -338,6 +346,8 @@ class PJeRegistrationFlow:
             "jus_postulandi": "PJe nao reconheceu o perfil como advogado e indicou Jus Postulandi",
         }
         for group, reason in labels.items():
+            if group in skip:
+                continue
             marker = self.browser.page_text_contains(self.config.stop_markers.get(group, []))
             if marker:
                 self.audit.record("stop_marker_detected", self.state.value, {"group": group, "marker": marker})
