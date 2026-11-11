@@ -1,0 +1,9 @@
+herda = "_comum.toml"
+
+# TJCE 1o grau (TJCE-PJE-1G); caminho /pje1grau/; confirme com scripts\sondar.ps1 -Tribunal tjce
+# Libere o envio real (true/true) so depois de sondar + ensaio OK neste tribunal.
+[app]
+tribunal = "TJCE - 1o grau"
+base_url = "https://pje.tjce.jus.br/pje1grau/login.seam"
+selectors_approved = false
+allow_live_submission = false
