@@ -178,3 +178,12 @@ def test_sem_operador_continua_parando_para_revisao(monkeypatch):
 
     result, _ = _flow(monkeypatch, [_rep(["campo_ambiguo:uf"])], None)
     assert result.status == RunStatus.NEEDS_HUMAN
+
+
+def test_lista_opcional_desconhecida_nao_trava(pagina):
+    html = (FORM % "selected").replace(
+        "<label for=em>", "<label for=sx>Sexo</label><select id=sx><option value=''>Selecione</option>"
+        "<option value='F'>Feminino</option></select><label for=em>")
+    report = adaptive_form.operate(pagina(html), RECORD)
+    assert report["pending"] == [], report
+    assert any("Sexo" in item for item in report.get("ignored_optional", []))

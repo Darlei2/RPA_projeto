@@ -717,9 +717,10 @@ def operate(
             field.get("type") in ("checkbox", "radio")
             or field.get("tag") == "select"
         ):
-            report["pending"].append(
-                "controle_desconhecido_para_revisao"
-            )
+            # Lista/opcao OPCIONAL que o robo nao conhece (ex.: estado civil, sexo): fica como o PJe
+            # deixou. Se o PJe exigir algo ao avancar, a mensagem dele aparece e o robo para.
+            report.setdefault("ignored_optional", []).append(
+                "lista opcional: " + str(field.get("label") or field.get("name") or "?")[:80])
 
         else:
             report["unknown_optional"] += 1
