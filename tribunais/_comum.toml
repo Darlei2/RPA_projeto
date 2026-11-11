@@ -46,7 +46,7 @@ second_factor_input = ["css=input#otp", "css=input[name='otp']", "css=input[auto
 second_factor_submit = ["css=#kc-login", "role=button|name=Validar", "role=button|name=Confirmar", "role=button|name=Enviar", "role=button|name=Entrar"]
 
 [stop_markers]
-captcha = ["captcha", "nao sou um robo", "recaptcha"]
+captcha = ["captcha", "nao sou um robo", "recaptcha", "confirm you are human", "confirme que voce e humano"]
 certificate_error = ["certificado invalido", "certificado expirado", "certificado revogado", "erro no certificado"]
 access_blocked = ["acesso bloqueado", "acesso negado", "usuario bloqueado", "forbidden"]
 jus_postulandi = ["jus postulandi", "juspostulandi"]

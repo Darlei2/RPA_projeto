@@ -1,0 +1,9 @@
+herda = "_comum.toml"
+
+# TJES - 1o grau; confirme com scripts\sondar.ps1 -Tribunal tjes
+# Libere o envio real (true/true) so depois de sondar + ensaio OK neste tribunal.
+[app]
+tribunal = "TJES - 1o grau"
+base_url = "https://pje.tjes.jus.br/pje/login.seam"
+selectors_approved = false
+allow_live_submission = false

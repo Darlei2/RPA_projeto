@@ -15,6 +15,6 @@ if ($Tribunal.Count -eq 0) {
     $Configs = @(Get-ChildItem tribunais -Filter *.toml | Where-Object { $_.Name -ne "_comum.toml" } |
         ForEach-Object { Join-Path "tribunais" $_.Name })
 } else {
-    $Configs = @($Tribunal | ForEach-Object { Join-Path "tribunais" ("{0}.toml" -f $_.ToLower()) })
+    $Configs = @(($Tribunal -join ",") -split "[,;\s]+" | Where-Object { $_ } | ForEach-Object { Join-Path "tribunais" ("{0}.toml" -f $_.ToLower()) })
 }
 & $Python -m pje_rpa sondar --config $Configs
