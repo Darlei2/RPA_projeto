@@ -218,3 +218,43 @@ def test_rotulo_que_acha_o_painel_preenche_o_campo_de_dentro(tmp_path):
             b.fill("nada", "Segredo123")
         assert "Segredo123" not in str(err.value)
         browser.close()
+
+
+def test_botao_desconhecido_da_janela_criar_nova_senha(tmp_path):
+    """TRT/PDPJ: janela 'Criar nova senha' com botao de rotulo desconhecido e um 'Cancelar'."""
+    playwright = pytest.importorskip("playwright.sync_api")
+    from pje_rpa.credencial import _click_submit_near_password
+    html = """<html><body><div class=rich-mpnl id=panelNovaSenha><h3>Criar nova senha</h3>
+      <form onsubmit="return false"><input type=password id=a><input type=password id=b>
+      <button type=button onclick="window.cancelou=1">Cancelar</button>
+      <button type=button onclick="window.ok=1">Alterar</button></form></div></body></html>"""
+    (tmp_path / "s.html").write_text(html, encoding="utf-8")
+    with playwright.sync_playwright() as pw:
+        try:
+            browser = pw.chromium.launch()
+        except Exception as exc:  # noqa: BLE001
+            pytest.skip(f"chromium indisponivel: {exc}")
+        page = browser.new_page()
+        page.goto((tmp_path / "s.html").as_uri())
+        assert _click_submit_near_password(type("B", (), {"page": page})())
+        assert page.evaluate("window.ok") == 1 and page.evaluate("window.cancelou") is None
+        browser.close()
+
+
+def test_janela_do_proprio_formulario_de_senha_nao_e_mensagem(tmp_path):
+    playwright = pytest.importorskip("playwright.sync_api")
+    from pje_rpa.credencial import _dialog_text
+    html = """<html><body><div class=rich-mpnl-body>Criar nova senha. A senha precisa ser modificada porque
+      nao atende aos requisitos minimos de seguranca. <input type=password><input type=password>
+      <button>Alterar</button></div><div role=dialog>Senha alterada com sucesso</div></body></html>"""
+    (tmp_path / "s.html").write_text(html, encoding="utf-8")
+    with playwright.sync_playwright() as pw:
+        try:
+            browser = pw.chromium.launch()
+        except Exception as exc:  # noqa: BLE001
+            pytest.skip(f"chromium indisponivel: {exc}")
+        page = browser.new_page()
+        page.goto((tmp_path / "s.html").as_uri())
+        texto = _dialog_text(type("B", (), {"page": page})())
+        assert "sucesso" in texto and "requisitos" not in texto
+        browser.close()

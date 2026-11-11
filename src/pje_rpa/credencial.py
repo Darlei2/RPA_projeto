@@ -311,6 +311,9 @@ JS_DIALOG_TEXT = r"""() => {
   const out = [];
   for (const el of document.querySelectorAll(sel)) {
     if (!vis(el)) continue;
+    // A propria janela do formulario de senha (TRT/PDPJ: "Criar nova senha ... nao atende aos
+    // requisitos minimos") nao e mensagem de resultado: ignora quem contem campo de senha visivel.
+    if ([...el.querySelectorAll('input[type=password]')].some(vis)) continue;
     const t = (el.innerText || '').trim().replace(/\s+/g, ' ');
     if (t && !out.some(o => o.includes(t) || t.includes(o))) out.push(t.slice(0, 300));
   }
@@ -357,16 +360,59 @@ def _close_dialog(browser) -> None:
         pass
 
 
+# Botao do mesmo formulario/painel dos campos de senha (TRT/PDPJ: janela "Criar nova senha",
+# cujo botao nao tem um rotulo conhecido). Nunca clica em cancelar/fechar/voltar.
+JS_SUBMIT_NEAR_PASSWORD = r"""() => {
+  const vis = e => !!(e.getClientRects().length) && getComputedStyle(e).visibility !== 'hidden';
+  const pw = [...document.querySelectorAll('input[type=password]')].filter(vis);
+  if (!pw.length) return false;
+  const last = pw[pw.length - 1];
+  let box = last.closest('form') || last.parentElement;
+  const bad = /cancel|fechar|voltar|limpar|sair|ir para|desistir|mostrar|exibir|ocultar|olho/i;
+  while (box) {
+    const btns = [...box.querySelectorAll('button,input[type=submit],input[type=button],a[role=button],a.btn')]
+      .filter(b => vis(b) && !b.disabled && !bad.test((b.innerText || b.value || b.title || '').trim()));
+    if (btns.length) {
+      document.querySelectorAll('[data-pje-rpa-submit]').forEach(e => e.removeAttribute('data-pje-rpa-submit'));
+      btns[btns.length - 1].setAttribute('data-pje-rpa-submit', '1');
+      return true;
+    }
+    box = box.parentElement;
+  }
+  return false;
+}"""
+
+
+def _click_submit_near_password(browser) -> bool:
+    page = getattr(browser, "page", None)
+    if page is None:
+        return False
+    try:
+        if page.evaluate(JS_SUBMIT_NEAR_PASSWORD):
+            page.locator("[data-pje-rpa-submit]").first.click(timeout=4000)
+            return True
+        page.locator("input[type=password]:visible").last.press("Enter", timeout=3000)
+        return True
+    except Exception:  # noqa: BLE001
+        return False
+
+
 def _submit_password(browser, password: str) -> StepResult:
     browser.fill("new_password", password)
     if browser.visible("confirm_password", 1500):
         browser.fill("confirm_password", password)
+    erro = None
     try:
+        if not browser.visible("password_submit", 1500):
+            raise LookupError("password_submit")
         browser.click("password_submit")
     except Exception as exc:  # noqa: BLE001
+        if not _click_submit_near_password(browser):
+            erro = type(exc).__name__
+    if erro is not None:
         dialog = _dialog_text(browser)
         return StepResult(False, "Nao foi possivel clicar em cadastrar"
-                          + (f" (janela do PJe: {dialog})" if dialog else f" ({type(exc).__name__})"))
+                          + (f" (janela do PJe: {dialog})" if dialog else f" ({erro})"))
     deadline = time.monotonic() + 15
     hidden_since = None
     while time.monotonic() < deadline:

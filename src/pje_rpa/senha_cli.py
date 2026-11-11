@@ -266,6 +266,7 @@ def _one_tribunal(config, audit_root: Path, lawyer: dict, inbox, secret_2fa: str
             # Alguns PJe (ex.: TRF5 Turmas Recursais) mostram erro mas gravam a senha: confere
             # entrando com CPF + cada senha tentada + 2FA antes de desistir.
             print(f"FALHA: {step.detail}")
+            _report_failure(browser, audit, "nova-senha", False)  # print da tela ANTES de sair dela
             print(f"Conferindo se o PJe gravou alguma das {len(step.tried)} senha(s) tentada(s) (login CPF + senha + 2FA)...")
             for i, candidata in enumerate(step.tried, start=1):
                 teste = test_login(browser, config, lawyer["cpf"], candidata, _code_provider(secret_2fa))
