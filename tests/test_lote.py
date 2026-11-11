@@ -212,7 +212,7 @@ def test_assistente_pergunta_tribunal_e_planilha(pasta, monkeypatch):
     fake = Fake(respostas=["nao-existe", "tjpe", str(planilha)], cadastro=["REHEARSAL_OK"])
     code = run_executar(pasta / "audit", pasta / "out", deps=fake.deps())
     texto = "\n".join(fake.log)
-    assert "Tribunal nao reconhecido" in texto
+    assert "Nao reconhecido(s): nao-existe" in texto
     assert "TJPE" in texto and "ENSAIO" in texto  # tjpe nao liberado no repositorio -> ensaio
     assert fake.cadastros and fake.cadastros[0][2] is True
     assert code == 0
@@ -272,3 +272,60 @@ def test_cadastrar_instala_e_remove_o_certificado_e_nao_pede_senha_no_fluxo(tmp_
     errado = cadastrar(config, linha.record, (pasta / "adv.pfx").read_bytes(), "errada",
                        lambda m: "000000", pasta / "audit", store=store, notify=lambda m: None)
     assert errado.status == "ERROR" and "Senha incorreta" in errado.reason
+
+
+# --------------------------------------------------------- varios tribunais
+def test_escolha_de_varios_tribunais(monkeypatch):
+    from pje_rpa.lote import escolher_tribunais
+
+    monkeypatch.chdir(PROJECT)
+    opcoes = listar_tribunais()
+    idx = {o.chave: i + 1 for i, o in enumerate(opcoes)}
+    for resposta in ("tremg, tjpa, trt5", "tremg tjpa trt5", f"{idx['tremg']},{idx['tjpa']};{idx['trt5']}",
+                     "tremg, tjpa, trt5, tjpa"):
+        escolhidos, invalidos = escolher_tribunais(opcoes, resposta)
+        assert [o.chave for o in escolhidos] == ["tremg", "tjpa", "trt5"] and invalidos == []
+    escolhidos, invalidos = escolher_tribunais(opcoes, "tremg, xpto")
+    assert invalidos == ["xpto"]
+    assert [o.chave for o in escolher_tribunais(opcoes, "TJAP - 1o grau")[0]] == ["tjap"]
+
+
+def test_varios_tribunais_em_sequencia_com_uma_entrega(pasta, monkeypatch):
+    monkeypatch.chdir(PROJECT)
+    planilha = _xlsx(pasta / "a.xlsx", [_linha(senha=""), _linha(nome="SEGUNDO ADVOGADO", cpf="01234567890")])
+    fake = Fake(respostas=["tremg, tjpa, trt5", str(planilha)],
+                cadastro=["REHEARSAL_OK"] * 6)
+    perguntas = []
+    deps = fake.deps()
+    deps.secret = lambda p: perguntas.append(p) or "senha-a1"
+    assert run_executar(pasta / "audit", pasta / "out", deps=deps) == 0
+    # ordem: tribunal por tribunal, todos os advogados em cada um
+    assert [c[0] for c in fake.cadastros] == ["ADVOGADA DE TESTE", "SEGUNDO ADVOGADO"] * 3
+    # a senha do certificado e pedida uma vez por advogado, nao por tribunal
+    assert len([p for p in perguntas if "certificado" in p]) == 2
+    texto = "\n".join(fake.log)
+    assert "TRIBUNAL 1/3: TRE-MG" in texto and "TRIBUNAL 3/3: TRT5" in texto and "RESUMO GERAL" in texto
+    assert "cache" not in deps.extras  # segredos saem da memoria no fim
+
+
+def test_real_com_tribunal_nao_liberado_segue_so_com_os_liberados(pasta, monkeypatch, tmp_path):
+    import shutil
+
+    from pje_rpa import lote
+
+    trib = tmp_path / "tribunais"
+    trib.mkdir()
+    for nome in ("_comum.toml", "tjpe.toml"):
+        shutil.copy(PROJECT / "tribunais" / nome, trib / nome)
+    texto = (PROJECT / "tribunais" / "tremg.toml").read_text(encoding="utf-8")
+    (trib / "tremg.toml").write_text(texto.replace("selectors_approved = false", "selectors_approved = true")
+                                     .replace("allow_live_submission = false", "allow_live_submission = true"),
+                                     encoding="utf-8")
+    original = lote.listar_tribunais
+    monkeypatch.setattr(lote, "listar_tribunais", lambda pasta=trib: original(trib))
+    planilha = _xlsx(pasta / "a.xlsx", [_linha()])
+    fake = Fake(respostas=["tremg, tjpe", str(planilha)], cadastro=["COMPLETED"])
+    run_executar(pasta / "audit", pasta / "out", ensaio=False, deps=fake.deps())
+    texto = "\n".join(fake.log)
+    assert "Envio real NAO liberado em: TJPE" in texto
+    assert len(fake.cadastros) == 1 and fake.credenciais == ["52998224725"]

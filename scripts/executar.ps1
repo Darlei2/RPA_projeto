@@ -1,5 +1,5 @@
 param(
-    [string]$Tribunal = "",
+    [string[]]$Tribunal = @(),
     [string]$Planilha = "",
     [switch]$Ensaio,
     [switch]$Real,
@@ -17,10 +17,11 @@ $env:PYTHONPATH = Join-Path $ProjectRoot "src"
 # e-mail + teste de CPF + senha + 2FA. No fim grava entregas\credenciais-<data>.xlsx protegida.
 #   .\scripts\executar.ps1                          # pergunta tudo
 #   .\scripts\executar.ps1 -Tribunal tjpe           # ja escolhe o tribunal
+#   .\scripts\executar.ps1 -Tribunal "tremg,tjpa,trt5"  # varios, um depois do outro
 #   .\scripts\executar.ps1 -Modelo                  # cria planilhas\advogados.xlsx para preencher
 # Abra o PJeOffice PRO antes do modo real.
 $PyArgs = @("-m", "pje_rpa", "executar")
-if ($Tribunal) { $PyArgs += @("--tribunal", $Tribunal) }
+if ($Tribunal) { $PyArgs += @("--tribunal", ($Tribunal -join ",")) }
 if ($Planilha) { $PyArgs += @("--planilha", $Planilha) }
 if ($Ensaio) { $PyArgs += "--ensaio" }
 if ($Real) { $PyArgs += "--real" }

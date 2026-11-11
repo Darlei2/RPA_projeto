@@ -164,7 +164,13 @@ cadastro com o A1 -> termo assinado -> "Solicitar nova senha" -> link do e-mail 
 .\scripts\executar.ps1 -Modelo     # 1a vez: cria planilhas\advogados.xlsx para preencher
 .\scripts\executar.ps1             # pergunta o tribunal, o modo e a planilha
 .\scripts\executar.ps1 -Tribunal tjpe -Planilha planilhas\advogados.xlsx
+.\scripts\executar.ps1 -Tribunal "tremg,tjpa,trt5"   # varios tribunais, um depois do outro
 ```
+
+- Varios tribunais: responda "tremg, tjpa, trt5" (ou os numeros "8,3,31"). O robo faz um tribunal de
+  cada vez, com todos os advogados em cada um; senhas do certificado, chave 2FA e caixa de e-mail sao
+  pedidas uma vez por advogado; no fim ha uma unica planilha de entrega e um resumo geral.
+  No modo real, tribunais sem envio liberado ficam de fora (o robo avisa e pede confirmacao).
 
 - Tribunal sem envio real liberado no `.toml` roda so em ENSAIO.
 - Colunas obrigatorias: nome, cpf, oab_numero, oab_uf, email, telefone, cep, logradouro, numero,

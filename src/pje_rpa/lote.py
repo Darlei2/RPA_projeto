@@ -62,6 +62,24 @@ def escolher_tribunal(opcoes: list[OpcaoTribunal], resposta: str) -> OpcaoTribun
     return candidatos[0] if len(candidatos) == 1 else None
 
 
+def escolher_tribunais(opcoes: list[OpcaoTribunal], resposta: str) -> tuple[list[OpcaoTribunal], list[str]]:
+    """Varios tribunais separados por virgula, ponto e virgula ou espaco: "8, 3, 31" ou
+    "tremg, tjpa, trt5". Mantem a ordem digitada e ignora repetidos.
+    Devolve (escolhidos, itens nao reconhecidos)."""
+    escolhidos: list[OpcaoTribunal] = []
+    invalidos: list[str] = []
+    partes = [p for p in re.split(r"[,;]+", resposta or "") if p.strip()]
+    if len(partes) == 1 and escolher_tribunal(opcoes, partes[0]) is None:
+        partes = partes[0].split()  # "tremg tjpa trt5"
+    for parte in partes:
+        opcao = escolher_tribunal(opcoes, parte)
+        if opcao is None:
+            invalidos.append(parte.strip())
+        elif opcao not in escolhidos:
+            escolhidos.append(opcao)
+    return escolhidos, invalidos
+
+
 # ------------------------------------------------------------------- execucao
 @dataclass
 class ResultadoAdvogado:
@@ -150,16 +168,23 @@ def processar_advogado(config: AppConfig, linha, audit_root: Path, deps: Depende
     record = linha.record
     deps.log(f"\n========== Linha {linha.numero_linha}: {linha.nome} ({config.tribunal}) ==========")
 
+    # Segredos pedidos uma vez por advogado e reaproveitados nos outros tribunais da execucao
+    # (so em memoria; o cache e apagado no fim de run_executar).
+    cache = deps.extras.setdefault("cache", {}).setdefault(linha.numero_linha, {})
     if linha.usa_windows:
         pfx, pfx_password = None, ""  # certificado ja instalado: sem arquivo e sem senha
     else:
         pfx = linha.certificado.read_bytes()
-        pfx_password = linha.segredo("senha_certificado") or deps.secret(
-            f"Senha do certificado A1 de {linha.nome}")
+        if "pfx_password" not in cache:
+            cache["pfx_password"] = linha.segredo("senha_certificado") or deps.secret(
+                f"Senha do certificado A1 de {linha.nome}")
+        pfx_password = cache["pfx_password"]
         if not pfx_password:
             res.cadastro, res.motivo = "PULADO", "senha do certificado nao informada"
             return res
-    secret_2fa = _chave_2fa(linha, deps)
+    if "secret_2fa" not in cache:
+        cache["secret_2fa"] = _chave_2fa(linha, deps)
+    secret_2fa = cache["secret_2fa"]
 
     # 1) Cadastro com o certificado
     deps.log("1/2 Cadastro com o certificado A1" + (" (instalado no Windows)" if linha.usa_windows else " (.pfx)"))
@@ -181,8 +206,10 @@ def processar_advogado(config: AppConfig, linha, audit_root: Path, deps: Depende
 
     # 2) Senha: pedido do link, e-mail, nova senha e teste do login
     deps.log("2/2 Credencial: nova senha pelo e-mail e teste de CPF + senha + 2FA")
-    inbox = deps.abrir_caixa(record.email, linha.segredo("imap_servidor"),
-                             linha.segredo("imap_usuario"), linha.segredo("imap_senha"), deps)
+    if "inbox" not in cache:
+        cache["inbox"] = deps.abrir_caixa(record.email, linha.segredo("imap_servidor"),
+                                          linha.segredo("imap_usuario"), linha.segredo("imap_senha"), deps)
+    inbox = cache["inbox"]
     lawyer = {"nome": record.nome_esperado, "cpf": record.cpf_esperado, "email": record.email,
               "chave_2fa_exibir": secret_2fa if deps.extras.get("chave_na_planilha", True) else ""}
     res.credencial = deps.credencial(config, audit_root, lawyer, inbox, secret_2fa)
@@ -191,7 +218,8 @@ def processar_advogado(config: AppConfig, linha, audit_root: Path, deps: Depende
 
 
 def executar_lote(config: AppConfig, linhas: list, audit_root: Path, saida: Path, deps: Dependencias, *,
-                  rehearsal: bool, nova_senha_se_ja_cadastrado: bool) -> list[ResultadoAdvogado]:
+                  rehearsal: bool, nova_senha_se_ja_cadastrado: bool,
+                  entregar: bool = True) -> list[ResultadoAdvogado]:
     from .execucao import limpar_pendentes
 
     try:  # certificados que uma execucao anterior deixou no repositorio do Windows
@@ -219,12 +247,48 @@ def executar_lote(config: AppConfig, linhas: list, audit_root: Path, saida: Path
                                                     f"{type(exc).__name__}: {exc}"))
     except KeyboardInterrupt:
         deps.log("\nInterrompido pelo operador: os advogados ja processados vao para a planilha.")
+        if not entregar:
+            _resumo(resultados, config, rehearsal, deps.log)
+            raise
     finally:
         credenciais = [r.credencial for r in resultados if r.credencial]
-        if credenciais:
+        if credenciais and entregar:
             deps.entregar(credenciais, saida)
     _resumo(resultados, config, rehearsal, deps.log)
     return resultados
+
+
+def executar_tribunais(configs: list[AppConfig], linhas: list, audit_root: Path, saida: Path,
+                       deps: Dependencias, *, rehearsal: bool,
+                       nova_senha_se_ja_cadastrado: bool) -> dict[str, list[ResultadoAdvogado]]:
+    """Um tribunal depois do outro (todos os advogados em cada um). Uma planilha de entrega no fim."""
+    por_tribunal: dict[str, list[ResultadoAdvogado]] = {}
+    try:
+        for n, config in enumerate(configs, start=1):
+            deps.log(f"\n##################### TRIBUNAL {n}/{len(configs)}: {config.tribunal} #####################")
+            por_tribunal[config.tribunal] = executar_lote(
+                config, linhas, audit_root, saida, deps, rehearsal=rehearsal,
+                nova_senha_se_ja_cadastrado=nova_senha_se_ja_cadastrado, entregar=False)
+    except KeyboardInterrupt:
+        deps.log("\nExecucao interrompida: os tribunais seguintes nao foram feitos.")
+    finally:
+        credenciais = [r.credencial for rs in por_tribunal.values() for r in rs if r.credencial]
+        if credenciais:
+            deps.entregar(credenciais, saida)
+    if len(configs) > 1:
+        _resumo_geral(por_tribunal, rehearsal, deps.log)
+    return por_tribunal
+
+
+def _resumo_geral(por_tribunal: dict[str, list[ResultadoAdvogado]], rehearsal: bool, log) -> None:
+    log(f"\n================ RESUMO GERAL{' (ENSAIO)' if rehearsal else ''} ================")
+    for tribunal, resultados in por_tribunal.items():
+        if rehearsal:
+            ok = sum(1 for r in resultados if r.cadastro == "REHEARSAL_OK")
+            log(f"  {tribunal:<24} ensaio OK: {ok} de {len(resultados)}")
+        else:
+            prontos = sum(1 for r in resultados if r.login_ok)
+            log(f"  {tribunal:<24} credenciais prontas: {prontos} de {len(resultados)}")
 
 
 def _resumo(resultados: list[ResultadoAdvogado], config: AppConfig, rehearsal: bool, log) -> None:
@@ -282,34 +346,48 @@ def run_executar(audit_root: Path = Path("runtime/audit"), saida: Path = Path("e
     deps = deps or _dependencias_padrao()
     log = deps.log
 
-    # 1) Tribunal
+    # 1) Tribunal(is)
     opcoes = listar_tribunais()
     if not opcoes:
         log("Nenhum tribunal configurado em tribunais\\")
         return 2
-    escolhido = escolher_tribunal(opcoes, tribunal) if tribunal else None
-    while escolhido is None:
+    escolhidos, invalidos = escolher_tribunais(opcoes, tribunal) if tribunal else ([], [])
+    if invalidos:
+        log("Nao reconhecido(s): " + ", ".join(invalidos))
+        escolhidos = []
+    while not escolhidos:
         log("\nTribunais disponiveis:")
         for i, o in enumerate(opcoes, start=1):
             log(f"  {i:>2}. {o.chave:<8} {o.nome:<28} {'[envio real liberado]' if o.liberado else '[so ensaio]'}")
-        escolhido = escolher_tribunal(opcoes, deps.ask("\nQual tribunal? (numero ou nome, ex.: tjap): "))
-        if escolhido is None:
-            log("Tribunal nao reconhecido, tente de novo.")
-    config = load_config(escolhido.caminho)
-    log(f"\nTribunal: {config.tribunal}  ({config.base_url})")
+        escolhidos, invalidos = escolher_tribunais(opcoes, deps.ask(
+            "\nQual(is) tribunal(is)? Um ou varios, separados por virgula (ex.: tremg, tjpa, trt5 ou 8,3,31): "))
+        if invalidos:
+            log("Nao reconhecido(s): " + ", ".join(invalidos) + ". Tente de novo.")
+            escolhidos = []
+    log("\nTribunais, nesta ordem:")
+    for i, o in enumerate(escolhidos, start=1):
+        log(f"  {i}. {o.nome}  {'[envio real liberado]' if o.liberado else '[so ensaio]'}")
 
     # 2) Modo
+    nao_liberados = [o for o in escolhidos if not o.liberado]
     if ensaio is None:
-        if not escolhido.liberado:
-            log("Envio real NAO liberado neste tribunal: sera ENSAIO (entra, confere e preenche, nao envia).")
-            log(f"Para liberar: selectors_approved = true e allow_live_submission = true em {escolhido.caminho}")
+        if len(nao_liberados) == len(escolhidos):
+            log("Nenhum destes tribunais tem envio real liberado: sera ENSAIO (entra, confere e preenche, nao envia).")
             ensaio = True
         else:
             ensaio = not deps.yes("Executar em modo REAL (cadastra, assina o termo e cria a senha)?", True)
-    elif not ensaio and not escolhido.liberado:
-        log(f"Envio real nao liberado em {escolhido.caminho}. Rode em ensaio ou libere o tribunal.")
-        return 2
+    if not ensaio and nao_liberados:
+        log("Envio real NAO liberado em: " + ", ".join(o.nome for o in nao_liberados))
+        log("Para liberar: selectors_approved = true e allow_live_submission = true no .toml do tribunal.")
+        if len(nao_liberados) == len(escolhidos) or not deps.yes(
+                "Seguir so com os tribunais liberados (os outros ficam de fora)?", True):
+            log("Cancelado. Rode em ensaio ou libere os tribunais.")
+            return 2
+        escolhidos = [o for o in escolhidos if o.liberado]
+    configs = [load_config(o.caminho) for o in escolhidos]
     log("Modo: " + ("ENSAIO (nada e enviado nem assinado)" if ensaio else "REAL"))
+    for c in configs:
+        log(f"  - {c.tribunal}  ({c.base_url})")
 
     # 3) Planilha
     caminho = Path(planilha) if planilha else None
@@ -340,16 +418,23 @@ def run_executar(audit_root: Path = Path("runtime/audit"), saida: Path = Path("e
     # 4) Opcoes e confirmacao
     nova_senha = False
     if not ensaio:
-        nova_senha = deps.yes("Se o advogado JA tiver cadastro neste tribunal, criar uma NOVA senha mesmo assim?", False)
+        nova_senha = deps.yes("Se o advogado JA tiver cadastro em algum destes tribunais, criar uma NOVA senha "
+                              "mesmo assim?", False)
         log("Abra o PJeOffice PRO antes de continuar (ele assina o login e o termo).")
+    nomes = ", ".join(c.tribunal for c in configs)
     if not deps.yes(f"Iniciar {'ENSAIO' if ensaio else 'CADASTRO REAL'} de {len(validas)} advogado(s) "
-                    f"no {config.tribunal}?", True):
+                    f"em {len(configs)} tribunal(is): {nomes}?", True):
         log("Cancelado.")
         return 1
 
     audit_root.mkdir(parents=True, exist_ok=True)
-    resultados = executar_lote(config, validas, audit_root, saida, deps, rehearsal=ensaio,
-                               nova_senha_se_ja_cadastrado=nova_senha)
+    try:
+        por_tribunal = executar_tribunais(configs, validas, audit_root, saida, deps, rehearsal=ensaio,
+                                          nova_senha_se_ja_cadastrado=nova_senha)
+    finally:
+        deps.extras.pop("cache", None)  # senhas/chaves pedidas nesta execucao saem da memoria
+    resultados = [r for rs in por_tribunal.values() for r in rs]
+    esperado = len(validas) * len(configs)
     if ensaio:
-        return 0 if resultados and all(r.cadastro == "REHEARSAL_OK" for r in resultados) else 3
-    return 0 if resultados and all(r.login_ok for r in resultados) else 3
+        return 0 if len(resultados) == esperado and all(r.cadastro == "REHEARSAL_OK" for r in resultados) else 3
+    return 0 if len(resultados) == esperado and all(r.login_ok for r in resultados) else 3

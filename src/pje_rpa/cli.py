@@ -54,7 +54,7 @@ def build_parser() -> argparse.ArgumentParser:
                           help="Pasta da planilha de entrega (protegida por senha)")
 
     run = sub.add_parser("executar", help="Fluxo inteiro (cadastro + senha + teste) para os advogados de uma planilha")
-    run.add_argument("--tribunal", default="", help="Ex.: tjap (sem ele, o robo pergunta)")
+    run.add_argument("--tribunal", default="", help="Um ou varios: tjap ou tremg,tjpa,trt5 (sem ele, o robo pergunta)")
     run.add_argument("--planilha", default="", help="Ex.: planilhas\\advogados.xlsx (sem ela, o robo pergunta)")
     mode = run.add_mutually_exclusive_group()
     mode.add_argument("--ensaio", action="store_true", default=None, help="Para antes de enviar (nada e assinado)")

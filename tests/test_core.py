@@ -151,7 +151,10 @@ class CoreTests(unittest.TestCase):
             log = audit.path.read_text(encoding="utf-8")
             self.assertIn("primeirograu/Painel", log)
             self.assertIn("BEM-VINDO", log)
-            page = log.split('"page"')[1]
+            # So o campo "page" do evento: o resto da linha tem hash/uuid aleatorios (que podem conter "529").
+            import json
+            failed = next(json.loads(l) for l in log.splitlines() if '"flow_failed"' in l)
+            page = json.dumps(failed["details"]["page"], ensure_ascii=False)
             self.assertNotIn("ADVOGADO", page)
             self.assertNotIn("529", page)
 
