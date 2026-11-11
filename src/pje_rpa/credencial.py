@@ -168,10 +168,14 @@ def request_password_link(browser, config, cpf: str, email: str) -> StepResult:
     """Etapas 1-2: sai do PJe e pede o link de criacao de senha para o e-mail cadastrado."""
     ensure_selectors(config)
     browser.reset_session()
-    if not open_login(browser, config):
-        return _fail(browser, "Tela de login do tribunal nao abriu")
-    if not browser.visible("forgot_password_link", 8000):
-        return _fail(browser, "Link 'Esqueceu a senha?' nao localizado")
+    # TRTs: "Esqueci minha senha" fica na pagina do PJe, ao lado de "Entrar com PDPJ"; depois de
+    # entrar no PDPJ ele nao existe mais. Entao procura ali ANTES de clicar no botao do PDPJ.
+    browser.open(config.base_url)
+    if not browser.visible("forgot_password_link", 5000):
+        if not open_login(browser, config):
+            return _fail(browser, "Tela de login do tribunal nao abriu")
+        if not browser.visible("forgot_password_link", 8000):
+            return _fail(browser, "Link 'Esqueceu a senha?' nao localizado")
     browser.click("forgot_password_link")
     # Primeiro espera o campo da janela de recuperacao; so depois aceita os genericos
     # (pagina propria de recuperacao, onde o login nao esta na tela).

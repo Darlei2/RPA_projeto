@@ -62,14 +62,20 @@ JS_SNAPSHOT = r"""() => {
       block?.querySelector('legend,h1,h2,h3,h4,h5,h6,.panel-heading,.panel-title,.card-header,.card-title') || null
     ).slice(0, 100);
 
-    const ownLabel = [labels, aria].filter(Boolean).join(' ') ||
+    const noStar = s => (s || '').replace(/\*/g, ' ').replace(/\s+/g, ' ').trim();
+    const rawLabel = [labels, aria].filter(Boolean).join(' ') ||
       [parentLabel, rowLabel].filter(Boolean).join(' ');
+    // Rotulo que e so "*" (a estrela fica numa celula propria): usa o texto das outras celulas da linha
+    const tr = e.closest('tr');
+    const rowOthers = tr ? noStar([...tr.cells].filter(c => !c.contains(e)).map(txt).join(' ')).slice(0, 100) : '';
+    const ownLabel = noStar(rawLabel) ? rawLabel : (rowOthers || rawLabel);
     // Obrigatorio: atributo, "*" no rotulo ou aviso "campo obrigatorio" na mesma linha
     // (os TRTs so mostram o aviso depois de tentar enviar).
     const row = e.closest('tr');
     // so a linha do proprio campo (tabela de layout aninhada: a linha mais proxima)
     const rowWarn = row && row.querySelectorAll('input,select,textarea').length <= 3 ? txt(row) : '';
-    const marked = /\*\s*:?$/.test(ownLabel) ||
+    const star = /(^|\s)\*(\s|:|$)/;  // "*" como marca de obrigatorio, antes ou depois do rotulo
+    const marked = star.test(rawLabel) || star.test(ownLabel) || /\S\*\s*:?$/.test(rawLabel) ||
       /campo obrigat|preenchimento obrigat/i.test(rowWarn.replace(ownLabel, ''));
 
     const options = e.tagName === 'SELECT'
@@ -264,6 +270,7 @@ PATTERNS = {
     "rg_numero": r"\b(?:rg|identidade|registro geral)\b",
     "rg_orgao": r"\borgao\b.*\b(?:expedi\w*|emissor|emissao)\b|\b(?:orgao|emissor) (?:do )?rg\b",
     "rg_data": r"\bdata\b.*\b(?:expedicao|emissao)\b",
+    "estado_civil": r"\bestado civil\b",
     "ddd": r"\bddd\b",
     "phone": r"\btelefone\b|\bcelular\b|\bfone\b",
     "cep": r"\bcep\b|\bcodigo postal\b",
@@ -464,6 +471,7 @@ def desired(record: Any) -> dict[str, str]:
         "rg_numero": getattr(record, "rg_numero", ""),
         "rg_orgao": getattr(record, "rg_orgao", ""),
         "rg_data": getattr(record, "rg_data_expedicao", ""),
+        "estado_civil": getattr(record, "estado_civil", ""),
         "phone": (
             phone[2:]
             if len(phone) in (10, 11)
@@ -588,6 +596,9 @@ def same(
     if key == "rg_data":
         return numbers(actual) == numbers(expected)
 
+    if key == "estado_civil":
+        return bool(civil_stem(actual)) and civil_stem(actual) == civil_stem(expected)
+
     if key in ("rg_numero", "rg_orgao"):
         return re.sub(r"[^0-9a-z]", "", norm(actual)) == re.sub(r"[^0-9a-z]", "", norm(expected))
 
@@ -621,10 +632,25 @@ def scan(page: Any) -> dict[str, Any]:
     return page.evaluate(JS_SNAPSHOT)
 
 
+def civil_stem(value: str) -> str:
+    """"Solteiro(a)", "SOLTEIRA", "solteiro" -> "solteir"; "Uniao estavel" -> "uniao estavel"."""
+    text = re.sub(r"[^a-z ]+", " ", norm(value)).strip()
+    if text.startswith("uniao") or "estavel" in text:
+        return "uniao estavel"
+    first = text.split(" ")[0] if text else ""
+    return re.sub(r"(os|as|o|a)$", "", first)
+
+
 def option_choice(
     field: dict[str, Any],
-    value: str
+    value: str,
+    key: str = "",
 ) -> str | None:
+
+    if key == "estado_civil":
+        found = [o["value"] for o in field.get("options", [])
+                 if civil_stem(value) and civil_stem(o.get("label", "")) == civil_stem(value)]
+        return found[0] if len(found) == 1 else None
 
     candidates = {norm(value)}
 
@@ -903,6 +929,7 @@ def operate(
         "rg_numero",
         "rg_orgao",
         "rg_data",
+        "estado_civil",
     ]
 
     for key in ordered:
@@ -988,9 +1015,12 @@ def operate(
             continue
 
         # Valor ja correto: nao alterar.
+        shown = current["value"]
+        if current["tag"] == "select":  # compara tambem o texto da opcao escolhida
+            shown = next((o["label"] for o in current["options"] if o["value"] == current["value"]), shown)
         if (
             current["value"]
-            and same(key, current["value"], value)
+            and (same(key, current["value"], value) or same(key, shown, value))
         ):
             report["preserved"].append(key)
             continue
@@ -1028,7 +1058,7 @@ def operate(
         try:
             if current["tag"] == "select":
                 option = option_choice(
-                    current, value
+                    current, value, key
                 )
 
                 if option is None:
@@ -1085,9 +1115,13 @@ def operate(
                     None
                 )
 
+            changed_text = changed["value"] if changed else ""
+            if changed and changed.get("tag") == "select":
+                changed_text = next((o["label"] for o in changed.get("options", [])
+                                     if o["value"] == changed["value"]), changed_text)
             if (
                 changed
-                and same(key, changed["value"], value)
+                and (same(key, changed["value"], value) or same(key, changed_text, value))
             ):
                 report["filled"].append(key)
             else:

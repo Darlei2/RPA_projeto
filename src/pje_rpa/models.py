@@ -57,6 +57,7 @@ class LawyerRecord:
     rg_numero: str = ""
     rg_orgao: str = ""
     rg_data_expedicao: str = ""
+    estado_civil: str = ""       # ex.: solteiro(a), casado(a)... (os TRTs exigem)
 
     def safe_summary(self) -> dict[str, Any]:
         return {

@@ -196,6 +196,9 @@ O robo identifica cada campo pelo rotulo e pelo bloco da tela, e so preenche o q
 - endereco bloqueado e ja preenchido pelo PJe (pelo CEP) e mantido como esta e registrado;
 - "E-mail (confirmacao)" recebe o mesmo e-mail; RG, orgao expedidor e data de expedicao vem das colunas
   opcionais `rg_numero`, `rg_orgao` e `rg_data_expedicao` da planilha (os TRTs exigem);
+- "Estado civil" vem da coluna opcional `estado_civil` (solteiro(a), casado(a)...; os TRTs exigem). Sem ela,
+  o modo assistido pausa para o operador escolher no Edge;
+- TRTs: o pedido de nova senha usa o "Esqueci minha senha" da pagina do PJe (antes de "Entrar com PDPJ");
 - PJe que so avisa "campo obrigatorio" depois de enviar (TRTs): o robo reavalia o formulario devolvido,
   preenche o que tiver dado e, no modo assistido, pausa para o operador completar o resto no Edge;
 - o ensaio avisa quando o formulario tem campo sem dado na planilha (ex.: RG);

@@ -11,7 +11,8 @@ from pje_rpa.config import load_lawyer
 
 PROJECT = Path(__file__).resolve().parents[1]
 RECORD = load_lawyer(PROJECT / "cadastro.example.json")
-COM_RG = dataclasses.replace(RECORD, rg_numero="12.345.678-9", rg_orgao="SSP/BA", rg_data_expedicao="20/03/2015")
+COM_RG = dataclasses.replace(RECORD, rg_numero="12.345.678-9", rg_orgao="SSP/BA", rg_data_expedicao="20/03/2015",
+                             estado_civil="SOLTEIRA")
 
 AVISO = '<td><span class="erro">campo obrigat&oacute;rio</span></td>'
 
@@ -32,7 +33,7 @@ def _form(depois_de_enviar: bool) -> str:
  <tr><td>&Oacute;rg&atilde;o de expedi&ccedil;&atilde;o do RG</td><td><input id=org></td>{aviso}</tr>
  <tr><td>Data de expedi&ccedil;&atilde;o do RG</td><td><input id=dt></td></tr>
  <tr><td>UF de nascimento</td><td><select id=ufn><option>Selecione...</option><option>BA</option></select></td></tr>
- <tr><td>Estado civil</td><td><select id=ec><option>Selecione...</option><option>Casado</option></select></td></tr>
+ <tr><td>Estado civil</td><td><select id=ec><option value="">Selecione...</option><option value="1">Solteiro(a)</option><option value="2">Casado(a)</option></select></td><td>*</td></tr>
 </table><button>Confirmar dados e prosseguir</button></body></html>"""
 
 
@@ -79,6 +80,7 @@ def test_confirmacao_de_email_e_rg_preenchidos(pagina):
     assert page.input_value("#org") == "SSP/BA"
     assert page.input_value("#dt") == "20/03/2015"
     assert page.input_value("#pai") == ""  # "Nome do pai" nao e o nome do advogado
+    assert page.input_value("#ec") == "1"  # "SOLTEIRA" na planilha -> opcao "Solteiro(a)"
 
 
 def test_rg_sem_dado_no_ensaio_vira_aviso(pagina):
@@ -173,3 +175,20 @@ def test_formulario_devolvido_sem_campo_indicado_para_com_mensagem(monkeypatch):
 
     result, _ = _flow_devolvido(monkeypatch, [_rep(), _rep()], None)
     assert result.status == RunStatus.NEEDS_HUMAN and "campo obrigatorio" in result.reason.lower()
+
+
+def test_estado_civil_com_estrela_em_celula_propria_aparece_com_o_rotulo(pagina):
+    html = _form(depois_de_enviar=False).replace(
+        "<tr><td>Estado civil</td><td><select id=ec>", "<tr><td>Estado civil</td><td><label>*</label><select id=ec>")
+    page = pagina(html)
+    campos = adaptive_form.scan(page)["controls"]
+    ec = next(c for c in campos if c["id"] == "ec")
+    assert "Estado civil" in ec["label"] and ec["required"]
+
+
+def test_estado_civil_variacoes():
+    from pje_rpa.adaptive_form import civil_stem
+    assert civil_stem("Solteiro(a)") == civil_stem("SOLTEIRA") == civil_stem("solteiro")
+    assert civil_stem("Casado(a)") == civil_stem("casada")
+    assert civil_stem("União estável") == civil_stem("uniao estavel")
+    assert civil_stem("Casado(a)") != civil_stem("Solteiro(a)")

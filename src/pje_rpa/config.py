@@ -130,6 +130,7 @@ def lawyer_from_dict(raw: dict) -> LawyerRecord:
         rg_numero=str(raw.get("rg_numero", "")).strip(),
         rg_orgao=str(raw.get("rg_orgao", "")).strip().upper(),
         rg_data_expedicao=str(raw.get("rg_data_expedicao", "")).strip(),
+        estado_civil=str(raw.get("estado_civil", "")).strip(),
     )
     errors = validate_lawyer(record)
     if errors:

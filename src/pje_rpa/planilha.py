@@ -38,6 +38,7 @@ COLUNAS: dict[str, tuple[str, ...]] = {
     "rg_numero": ("rg", "rg_numero", "numero_rg", "identidade", "numero_identidade"),
     "rg_orgao": ("rg_orgao", "orgao_rg", "orgao_expedidor", "orgao_emissor", "orgao_expedicao_rg"),
     "rg_data_expedicao": ("rg_data_expedicao", "data_expedicao_rg", "data_rg", "data_expedicao"),
+    "estado_civil": ("estado_civil", "estadocivil"),
     "autorizacao_ref": ("autorizacao_ref", "autorizacao", "referencia_autorizacao", "termo_autorizacao"),
     "certificado": ("certificado", "arquivo_certificado", "pfx", "caminho_pfx", "certificado_a1"),
     "senha_certificado": ("senha_certificado", "senha_do_certificado", "senha_pfx", "senha_a1"),
@@ -182,6 +183,7 @@ def _validar(numero_linha: int, dados: dict[str, str], base: Path) -> LinhaAdvog
             "rg_numero": dados.get("rg_numero", ""),
             "rg_orgao": dados.get("rg_orgao", ""),
             "rg_data_expedicao": _data(dados.get("rg_data_expedicao", "")),
+            "estado_civil": dados.get("estado_civil", ""),
             "endereco": {k: dados.get(k, "") for k in
                          ("cep", "logradouro", "numero", "complemento", "bairro", "cidade", "uf")},
         })
@@ -210,11 +212,11 @@ def gravar_modelo(destino: Path) -> Path:
 
     cabecalho = ["nome", "cpf", "oab_numero", "oab_uf", "email", "telefone", "cep", "logradouro",
                  "numero", "complemento", "bairro", "cidade", "uf", "rg_numero", "rg_orgao",
-                 "rg_data_expedicao", "autorizacao_ref", "certificado",
+                 "rg_data_expedicao", "estado_civil", "autorizacao_ref", "certificado",
                  "senha_certificado", "chave_2fa", "imap_servidor", "imap_usuario", "imap_senha", "executar"]
     exemplo = ["ADVOGADO DE TESTE", "52998224725", "12345", "BA", "advogado@exemplo.com.br", "71999999999",
                "40000000", "RUA DE TESTE", "100", "", "CENTRO", "SALVADOR", "BA", "1234567", "SSP/BA",
-               "20/03/2015", "CONTRATO-123",
+               "20/03/2015", "solteiro(a)", "CONTRATO-123",
                "", "", "", "imap.gmail.com", "", "", "N"]
     wb = Workbook()
     ws = wb.active
@@ -235,6 +237,7 @@ def gravar_modelo(destino: Path) -> Path:
         "Uma linha por advogado. A linha de exemplo esta com executar = N (sera ignorada).",
         "Obrigatorias: nome, cpf, oab_numero, oab_uf, email, telefone, cep, logradouro, numero, bairro, cidade, uf.",
         "rg_numero, rg_orgao (ex.: SSP/RJ, DETRAN/RJ), rg_data_expedicao (dd/mm/aaaa): OPCIONAIS, mas os TRTs exigem.",
+        "estado_civil: solteiro(a), casado(a), divorciado(a), viuvo(a), separado(a) ou uniao estavel (os TRTs exigem).",
         "autorizacao_ref: referencia do documento em que o advogado autoriza o uso do A1 (obrigatoria no modo real).",
         "certificado: VAZIO = usa o A1 ja instalado no Windows com o CPF da linha (sem .pfx e sem senha).",
         "certificado: thumbprint (40 letras/numeros) = usa aquele certificado instalado no Windows.",

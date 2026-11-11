@@ -21,7 +21,7 @@ def _f(label, index=0, section="", value="", **kw):
 
 # ------------------------------------------------------------------ regras
 def test_estado_civil_nao_e_uf():
-    assert field_key(_f("Estado civil"))[0] is None
+    assert field_key(_f("Estado civil"))[0] == "estado_civil"  # coluna propria, nunca a UF
     assert field_key(_f("Estado"))[0] == "uf"
 
 
@@ -106,8 +106,8 @@ def test_formulario_trt_sem_ambiguidade_e_logradouro_preservado(pagina):
 def test_obrigatorio_sem_dado_vira_pendencia_com_rotulo(pagina):
     page = pagina(FORM % "")  # estado civil vazio e obrigatorio
     report = adaptive_form.operate(page, RECORD)
-    assert "campo_obrigatorio_desconhecido" in report["pending"]
-    assert any("Estado civil" in item for item in report.get("unknown_required", []))
+    # planilha sem estado civil: o robo nao inventa, pede ao operador
+    assert "campo_obrigatorio_sem_dado:estado_civil" in report["pending"]
 
 
 def test_campo_fixado_no_toml_vence_a_heuristica(pagina):
