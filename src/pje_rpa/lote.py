@@ -138,6 +138,10 @@ def _abrir_caixa(email: str, host: str, user: str, password: str, deps: Dependen
     from .email_inbox import ImapInbox, guess_imap_host
 
     gerada = False
+    if deps.extras.get("senha_via_email"):
+        # Rota de e-mail com IMAP cadastrado a mao: usa so a imap_senha da planilha ou o cofre,
+        # nunca tenta logar no Gmail (o Google bloqueia navegador automatizado).
+        email_senha = email_2fa = ""
     if not password:
         password = cofre_local.ler(email)
     if not password and email_senha and email_2fa:
@@ -233,9 +237,10 @@ def processar_advogado(config: AppConfig, linha, audit_root: Path, deps: Depende
     # 1) Cadastro com o certificado
     deps.log("1/2 Cadastro com o certificado A1" + (" (instalado no Windows)" if linha.usa_windows else " (.pfx)"))
     kwargs = {"rehearsal": rehearsal, "notify": deps.log, "thumbprint": linha.thumbprint}
-    if not rehearsal:
+    if not rehearsal and not deps.extras.get("senha_via_email"):
         # Senha pelo login unico (PDPJ), sem e-mail, na mesma sessao do certificado; se o tribunal
         # nao oferecer, o robo cai no caminho do e-mail ("Esqueci minha senha").
+        # Com extras["senha_via_email"], pula o login unico e vai direto pelo e-mail (IMAP da planilha).
         kwargs["senha_sso"] = True
         kwargs["senha_sso_ja_cadastrado"] = nova_senha_se_ja_cadastrado
     if deps.extras.get("assistido"):

@@ -424,3 +424,31 @@ def test_sem_email_nao_cai_no_esqueci_minha_senha(pasta):
                         rehearsal=False, nova_senha_se_ja_cadastrado=False)
     assert res[0].cadastro == "COMPLETED" and not res[0].login_ok
     assert "SENHA PENDENTE: nao ofereceu" in res[0].motivo and fake.credenciais == []
+
+
+def test_via_email_pula_o_login_unico_e_nao_loga_no_gmail(pasta, monkeypatch):
+    """Rota de e-mail: nao tenta senha pelo login unico e usa so a imap_senha (sem logar no Gmail)."""
+    from pje_rpa import lote
+
+    linhas = ler_planilha(_xlsx(pasta / "a.xlsx", [_linha()]))
+    fake = Fake()
+    deps = fake.deps()
+    deps.extras["senha_via_email"] = True
+    kwargs_vistos = {}
+
+    def cadastrar(config, record, pfx, pwd, code_provider, audit_root, **kw):
+        kwargs_vistos.update(kw)
+        return ResultadoCadastro("COMPLETED", "ok", "run")
+
+    deps.cadastrar = cadastrar
+    # o Gmail nunca pode ser chamado nesta rota
+    monkeypatch.setattr(lote, "_senha_de_app_gmail",
+                        lambda *a, **k: (_ for _ in ()).throw(AssertionError("nao deve logar no Gmail")))
+    executar_lote(_config(), linhas, pasta / "audit", pasta / "out", deps,
+                  rehearsal=False, nova_senha_se_ja_cadastrado=False)
+    assert "senha_sso" not in kwargs_vistos          # login unico pulado
+    assert fake.credenciais == ["52998224725"]        # foi pelo caminho do e-mail
+    # _abrir_caixa com senha_via_email zera email_senha/email_2fa: cai no setup manual, nunca no Gmail
+    from pje_rpa import senha_cli
+    monkeypatch.setattr(senha_cli, "_setup_inbox", lambda email: "SEM_GMAIL")
+    assert lote._abrir_caixa("x@gmail.com", "", "", "", deps, "senha-email", "CHAVE2FA") == "SEM_GMAIL"
