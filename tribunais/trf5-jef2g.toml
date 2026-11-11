@@ -1,0 +1,9 @@
+herda = "_comum.toml"
+
+# TRF5 - JEF Turmas Recursais; confirme com scripts\sondar.ps1 -Tribunal trf5-jef2g
+# Libere o envio real (true/true) so depois de sondar + ensaio OK neste tribunal.
+[app]
+tribunal = "TRF5 - JEF Turmas Recursais"
+base_url = "https://pje2g.trf5.jus.br/pje/login.seam"
+selectors_approved = false
+allow_live_submission = false

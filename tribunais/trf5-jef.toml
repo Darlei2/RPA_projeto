@@ -1,0 +1,9 @@
+herda = "_comum.toml"
+
+# TRF5 - JEF 1o grau; confirme com scripts\sondar.ps1 -Tribunal trf5-jef
+# Libere o envio real (true/true) so depois de sondar + ensaio OK neste tribunal.
+[app]
+tribunal = "TRF5 - JEF 1o grau"
+base_url = "https://pje1g.trf5.jus.br/pje/login.seam"
+selectors_approved = false
+allow_live_submission = false
