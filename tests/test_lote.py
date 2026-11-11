@@ -341,3 +341,30 @@ def test_tribunal_com_hifen_no_nome_do_arquivo(tmp_path):
               OpcaoTribunal("trf1", tmp_path / "d.toml", "TRF1 - 1o grau", False)]
     escolhidos, invalidos = escolher_tribunais(opcoes, "trf5-jef, trf5-jef2g, trf1-2g, trf1")
     assert [o.chave for o in escolhidos] == ["trf5-jef", "trf5-jef2g", "trf1-2g", "trf1"] and invalidos == []
+
+
+def test_so_senha_nao_entra_com_certificado(pasta, monkeypatch, tmp_path):
+    """Ja cadastrado: sem login com certificado (evita bloqueio), direto para nova senha + entrega."""
+    import shutil
+
+    from pje_rpa import lote
+
+    trib = tmp_path / "tribunais"
+    trib.mkdir()
+    shutil.copy(PROJECT / "tribunais" / "_comum.toml", trib / "_comum.toml")
+    texto = (PROJECT / "tribunais" / "trt5.toml").read_text(encoding="utf-8")
+    (trib / "trt5.toml").write_text(texto.replace("selectors_approved = false", "selectors_approved = true")
+                                    .replace("allow_live_submission = false", "allow_live_submission = true"),
+                                    encoding="utf-8")
+    original = lote.listar_tribunais
+    monkeypatch.setattr(lote, "listar_tribunais", lambda pasta=trib: original(trib))
+    planilha = _xlsx(pasta / "a.xlsx", [_linha(senha="nao-deve-ser-usada")])
+    fake = Fake(respostas=[str(planilha)])
+    perguntas = []
+    deps = fake.deps()
+    deps.yes = lambda p, d=False: perguntas.append(p) or True
+    assert run_executar(pasta / "audit", pasta / "out", tribunal="trt5", deps=deps, so_senha=True) == 0
+    assert fake.cadastros == []  # nenhum login com certificado
+    assert fake.credenciais == ["52998224725"] and fake.entregue
+    assert not any("NOVA senha mesmo assim" in p for p in perguntas)  # implicito no so senha
+    assert any("NOVA SENHA (sem cadastro)" in p for p in perguntas)

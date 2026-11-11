@@ -183,6 +183,8 @@ cadastro com o A1 -> termo assinado -> "Solicitar nova senha" -> link do e-mail 
   Se preencher, proteja a planilha com senha no Excel; a pasta `planilhas\` nao vai para o Git.
 - `executar = N` pula a linha. Um advogado com erro nao para o lote.
 - Advogado ja cadastrado no tribunal: a senha so e trocada se o operador confirmar no inicio.
+- `-SoSenha`: para quem JA tem cadastro naqueles tribunais. Nao entra com o certificado (evita bloqueio
+  por muitos logins seguidos) e vai direto para "Esqueci minha senha" + e-mail + nova senha + teste.
 
 
 ## 8. Formularios diferentes em cada PJe (adaptacao)

@@ -4,6 +4,7 @@ param(
     [switch]$Ensaio,
     [switch]$Real,
     [switch]$Modelo,
+    [switch]$SoSenha,
     [string]$Python = ".venv\Scripts\python.exe"
 )
 
@@ -18,6 +19,7 @@ $env:PYTHONPATH = Join-Path $ProjectRoot "src"
 #   .\scripts\executar.ps1                          # pergunta tudo
 #   .\scripts\executar.ps1 -Tribunal tjpe           # ja escolhe o tribunal
 #   .\scripts\executar.ps1 -Tribunal "tremg,tjpa,trt5"  # varios, um depois do outro
+#   .\scripts\executar.ps1 -Tribunal trt5 -SoSenha  # ja cadastrado: sem certificado, so nova senha
 #   .\scripts\executar.ps1 -Modelo                  # cria planilhas\advogados.xlsx para preencher
 # Abra o PJeOffice PRO antes do modo real.
 $PyArgs = @("-m", "pje_rpa", "executar")
@@ -26,4 +28,5 @@ if ($Planilha) { $PyArgs += @("--planilha", $Planilha) }
 if ($Ensaio) { $PyArgs += "--ensaio" }
 if ($Real) { $PyArgs += "--real" }
 if ($Modelo) { $PyArgs += "--modelo" }
+if ($SoSenha) { $PyArgs += "--so-senha" }
 & $Python @PyArgs

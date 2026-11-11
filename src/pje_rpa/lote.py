@@ -173,8 +173,8 @@ def processar_advogado(config: AppConfig, linha, audit_root: Path, deps: Depende
     # Segredos pedidos uma vez por advogado e reaproveitados nos outros tribunais da execucao
     # (so em memoria; o cache e apagado no fim de run_executar).
     cache = deps.extras.setdefault("cache", {}).setdefault(linha.numero_linha, {})
-    if linha.usa_windows:
-        pfx, pfx_password = None, ""  # certificado ja instalado: sem arquivo e sem senha
+    if linha.usa_windows or deps.extras.get("so_senha"):
+        pfx, pfx_password = None, ""  # certificado ja instalado (ou nao usado): sem arquivo e sem senha
     else:
         pfx = linha.certificado.read_bytes()
         if "pfx_password" not in cache:
@@ -187,6 +187,11 @@ def processar_advogado(config: AppConfig, linha, audit_root: Path, deps: Depende
     if "secret_2fa" not in cache:
         cache["secret_2fa"] = _chave_2fa(linha, deps)
     secret_2fa = cache["secret_2fa"]
+
+    if deps.extras.get("so_senha"):
+        res.cadastro, res.motivo = "NAO_TENTADO", "opcao so senha: cadastro nao conferido"
+        deps.log("1/2 Cadastro: pulado (opcao so senha, sem login com certificado)")
+        return _etapa_senha(config, linha, audit_root, deps, res, cache, secret_2fa)
 
     # 1) Cadastro com o certificado
     deps.log("1/2 Cadastro com o certificado A1" + (" (instalado no Windows)" if linha.usa_windows else " (.pfx)"))
@@ -209,7 +214,12 @@ def processar_advogado(config: AppConfig, linha, audit_root: Path, deps: Depende
             res.motivo += " (senha nao alterada: opcao desligada)"
         return res
 
-    # 2) Senha: pedido do link, e-mail, nova senha e teste do login
+    return _etapa_senha(config, linha, audit_root, deps, res, cache, secret_2fa)
+
+
+def _etapa_senha(config, linha, audit_root: Path, deps: Dependencias, res, cache: dict, secret_2fa: str):
+    """2) Senha: pedido do link, e-mail, nova senha e teste do login."""
+    record = linha.record
     deps.log("2/2 Credencial: nova senha pelo e-mail e teste de CPF + senha + 2FA")
     if "inbox" not in cache:
         cache["inbox"] = deps.abrir_caixa(record.email, linha.segredo("imap_servidor"),
@@ -400,12 +410,18 @@ def _conferir_certificados_windows(linhas: list, deps: Dependencias) -> None:
 # ------------------------------------------------------------- assistente
 def run_executar(audit_root: Path = Path("runtime/audit"), saida: Path = Path("entregas"),
                  tribunal: str = "", planilha: str = "", ensaio: bool | None = None,
-                 deps: Dependencias | None = None) -> int:
+                 deps: Dependencias | None = None, so_senha: bool = False) -> int:
     from .config import load_config
     from .planilha import gravar_modelo, ler_planilha
 
     deps = deps or _dependencias_padrao()
     log = deps.log
+    if so_senha:
+        # Advogado ja cadastrado nesses tribunais: nao entra com o certificado (evita bloqueio por
+        # excesso de logins) e vai direto para nova senha + teste de login (+ entrega).
+        ensaio = False
+        deps.extras["so_senha"] = True
+        log("SO SENHA: sem login com certificado. Use apenas para tribunais onde o advogado JA tem cadastro.")
 
     # 1) Tribunal(is)
     opcoes = listar_tribunais()
@@ -482,12 +498,15 @@ def run_executar(audit_root: Path = Path("runtime/audit"), saida: Path = Path("e
             "Modo assistido: se o robo tiver duvida num formulario, pausar para voce resolver no Edge "
             "(em vez de pular o advogado)?", True)
     nova_senha = False
-    if not ensaio:
+    if so_senha:
+        nova_senha = True
+    elif not ensaio:
         nova_senha = deps.yes("Se o advogado JA tiver cadastro em algum destes tribunais, criar uma NOVA senha "
                               "mesmo assim?", False)
         log("Abra o PJeOffice PRO antes de continuar (ele assina o login e o termo).")
     nomes = ", ".join(c.tribunal for c in configs)
-    if not deps.yes(f"Iniciar {'ENSAIO' if ensaio else 'CADASTRO REAL'} de {len(validas)} advogado(s) "
+    acao = "ENSAIO" if ensaio else ("NOVA SENHA (sem cadastro)" if so_senha else "CADASTRO REAL")
+    if not deps.yes(f"Iniciar {acao} de {len(validas)} advogado(s) "
                     f"em {len(configs)} tribunal(is): {nomes}?", True):
         log("Cancelado.")
         return 1

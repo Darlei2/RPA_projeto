@@ -60,6 +60,8 @@ def build_parser() -> argparse.ArgumentParser:
     mode.add_argument("--ensaio", action="store_true", default=None, help="Para antes de enviar (nada e assinado)")
     mode.add_argument("--real", action="store_true", default=None, help="Cadastro real (tribunal precisa estar liberado)")
     run.add_argument("--modelo", action="store_true", help="So cria a planilha modelo em planilhas\\advogados.xlsx")
+    run.add_argument("--so-senha", action="store_true",
+                     help="Advogado ja cadastrado: sem login com certificado, so nova senha + teste")
     run.add_argument("--audit-root", type=Path, default=Path("runtime/audit"))
     run.add_argument("--saida", type=Path, default=Path("entregas"))
 
@@ -116,7 +118,8 @@ def main(argv: list[str] | None = None) -> int:
                     print(f"Planilha modelo criada: {gravar_modelo(destino)}")
                 return 0
             ensaio = True if args.ensaio else (False if args.real else None)
-            return run_executar(args.audit_root, args.saida, args.tribunal, args.planilha, ensaio)
+            return run_executar(args.audit_root, args.saida, args.tribunal, args.planilha, ensaio,
+                                so_senha=args.so_senha)
         if args.command == "relatorio":
             from .tribunais import format_relatorio, relatorio
             data = relatorio(args.audit_root, args.meta)
