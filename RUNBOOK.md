@@ -174,7 +174,7 @@ cadastro com o A1 -> termo assinado -> "Solicitar nova senha" -> link do e-mail 
 
 - Tribunal sem envio real liberado no `.toml` roda so em ENSAIO.
 - Colunas obrigatorias: nome, cpf, oab_numero, oab_uf, email, telefone, cep, logradouro, numero,
-  bairro, cidade, uf. `autorizacao_ref` e obrigatoria no modo real.
+  bairro, cidade, uf. `autorizacao_ref` e opcional (se preenchida, fica na auditoria).
 - Coluna `certificado`: **vazia** = usa o A1 ja instalado no Windows (Cert:\CurrentUser\My) com o
   CPF da linha, sem .pfx e sem senha (havendo renovacao, o de validade mais longa); **thumbprint**
   (40 caracteres) = aquele certificado instalado; **caminho do .pfx** = instala so durante a execucao.

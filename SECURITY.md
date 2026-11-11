@@ -31,8 +31,9 @@
 ## Autorizacao
 
 Rodar o cadastro sem o titular presente exige autorizacao documentada do advogado para
-o uso do A1 e a assinatura do termo de compromisso. A referencia desse documento
-(`autorizacao_ref`) e registrada no log de auditoria de cada execucao.
+o uso do A1 e a assinatura do termo de compromisso. Esses contratos sao controlados na base
+do operador; a referencia (`autorizacao_ref`) e opcional no robo e, quando informada, e
+registrada no log de auditoria de cada execucao.
 
 ## Evidencias e logs
 

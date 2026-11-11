@@ -368,3 +368,16 @@ def test_so_senha_nao_entra_com_certificado(pasta, monkeypatch, tmp_path):
     assert fake.credenciais == ["52998224725"] and fake.entregue
     assert not any("NOVA senha mesmo assim" in p for p in perguntas)  # implicito no so senha
     assert any("NOVA SENHA (sem cadastro)" in p for p in perguntas)
+
+
+def test_modo_real_nao_exige_referencia_de_autorizacao(pasta):
+    """Os contratos ficam na base do operador: a coluna autorizacao_ref e opcional."""
+    import dataclasses
+
+    from pje_rpa.config import assert_live_ready, assert_rehearsal_ready
+
+    linha = ler_planilha(_xlsx(pasta / "a.xlsx", [_linha(nome="MARIA DA SILVA")]))[0]
+    record = dataclasses.replace(linha.record, autorizacao_ref="")
+    config = dataclasses.replace(_config(), selectors_approved=True, allow_live_submission=True)
+    assert_live_ready(config, record)       # nao levanta erro
+    assert_rehearsal_ready(config, record)

@@ -503,8 +503,8 @@ _PAGE = """<!doctype html>
       <div><label>Cidade</label><input id="cidade"></div>
       <div><label>UF</label><input id="uf" maxlength="2"></div>
     </div>
-    <label>Referencia da autorizacao do advogado</label><input id="autorizacao_ref"
-      placeholder="contrato/termo que autoriza o uso do A1 (minimo 3 caracteres)">
+    <label>Referencia da autorizacao do advogado (opcional)</label><input id="autorizacao_ref"
+      placeholder="contrato/termo que autoriza o uso do A1">
     <p class="note">O cadastro so segue se nome e CPF do certificado baterem com estes dados.</p>
     <button id="go" disabled>Iniciar cadastro</button>
   </div>
@@ -538,10 +538,9 @@ file.onchange=load;
 function load(){const f=file.files[0];if(!f)return;const r=new FileReader();
   r.onload=()=>{pfxB64=r.result.split(",")[1];drop.textContent=f.name;drop.classList.add("has");check()};
   r.readAsDataURL(f);}
-const req=["password","nome","cpf","oab_numero","oab_uf","email","telefone","cep","numero","logradouro","bairro","cidade","uf","autorizacao_ref"];
+const req=["password","nome","cpf","oab_numero","oab_uf","email","telefone","cep","numero","logradouro","bairro","cidade","uf"];
 req.forEach(id=>$(id).oninput=check);
-function check(){$("go").disabled=!(pfxB64&&req.every(id=>$(id).value.trim())
-  &&$("autorizacao_ref").value.trim().length>=3)}
+function check(){$("go").disabled=!(pfxB64&&req.every(id=>$(id).value.trim()))}
 function addStep(text,cls){const li=document.createElement("li");
   li.innerHTML=`<span class="dot ${cls||''}"></span><span>${text}</span>`;$("steps").append(li);}
 $("go").onclick=async()=>{

@@ -90,7 +90,7 @@ class AppConfig:
     selectors: dict[str, list[str]]
     stop_markers: dict[str, list[str]]
     signer: "SignerConfig | None" = None
-    require_authorization_ref: bool = True
+    require_authorization_ref: bool = False  # sem efeito (mantido para os .toml antigos)
 
 
 @dataclass

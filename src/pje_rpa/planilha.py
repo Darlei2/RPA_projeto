@@ -241,7 +241,7 @@ def gravar_modelo(destino: Path) -> Path:
         "Obrigatorias: nome, cpf, oab_numero, oab_uf, email, telefone, cep, logradouro, numero, bairro, cidade, uf.",
         "rg_numero, rg_orgao (ex.: SSP/RJ, DETRAN/RJ), rg_data_expedicao (dd/mm/aaaa): OPCIONAIS, mas os TRTs exigem.",
         "estado_civil: solteiro(a), casado(a), divorciado(a), viuvo(a), separado(a) ou uniao estavel (os TRTs exigem).",
-        "autorizacao_ref: referencia do documento em que o advogado autoriza o uso do A1 (obrigatoria no modo real).",
+        "autorizacao_ref: OPCIONAL. Referencia do contrato/autorizacao do advogado; se preenchida, fica na auditoria.",
         "certificado: VAZIO = usa o A1 ja instalado no Windows com o CPF da linha (sem .pfx e sem senha).",
         "certificado: thumbprint (40 letras/numeros) = usa aquele certificado instalado no Windows.",
         "certificado: caminho do .pfx (ex.: C:\\certificados\\fulano.pfx) = instala so durante a execucao e remove no fim.",

@@ -55,8 +55,7 @@ Estas nao sao contornaveis e sao intencionais:
 - Um A1 identifica seu titular: o cadastro so prossegue se nome e CPF do certificado
   baterem com os dados informados. Nao ha cadastro em massa de terceiros neste projeto.
 - O robo nao recebe nem grava a senha em disco; ela vive apenas durante a execucao.
-- O modo real exige dominio oficial terminado em `.jus.br` e a referencia da autorizacao
-  do advogado (`autorizacao_ref`).
+- O modo real exige dominio oficial terminado em `.jus.br`.
 - O robo nao usa endpoints internos, engenharia reversa ou chamadas privadas do PJe.
 
 ## Base legal da assinatura
@@ -64,7 +63,8 @@ Estas nao sao contornaveis e sao intencionais:
 O cadastro termina na assinatura do **termo de compromisso**, declaracao pessoal do
 advogado. Com A1, a assinatura ICP-Brasil presume autoria do titular (MP 2.200-2/2001).
 Rodar isso sem o titular presente so se sustenta se houver autorizacao documentada do
-advogado para a operacao — registre essa referencia em `autorizacao_ref` e valide o
+advogado para a operacao. O controle desses contratos fica na base do operador; a coluna
+`autorizacao_ref` e opcional e, quando preenchida, fica registrada na auditoria. Valide o
 modelo com o juridico antes de producao.
 
 ## Arquivos principais

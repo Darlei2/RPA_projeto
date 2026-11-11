@@ -88,7 +88,8 @@ def load_config(path: Path) -> AppConfig:
         selectors=selectors,
         stop_markers=stop_markers,
         signer=_signer_config(raw.get("signer", {})),
-        require_authorization_ref=bool(app.get("require_authorization_ref", True)),
+        # chave antiga dos .toml: aceita, mas sem efeito (a referencia deixou de ser exigida)
+        require_authorization_ref=bool(app.get("require_authorization_ref", False)),
     )
 
 
@@ -183,8 +184,8 @@ def assert_rehearsal_ready(config: AppConfig, record: LawyerRecord | None = None
 def _assert_official_target(config: AppConfig, record: LawyerRecord | None) -> None:
     if "exemplo" in config.base_url.lower() or "example" in config.base_url.lower():
         raise ConfigurationError("Substitua a URL de exemplo pela URL oficial do tribunal")
-    if record and config.require_authorization_ref and len(record.autorizacao_ref) < 3:
-        raise ConfigurationError("Informe a referencia da autorizacao do advogado (autorizacao_ref)")
+    # autorizacao_ref e opcional: os contratos/autorizacoes ficam na base do operador. Quando
+    # preenchida, continua registrada na auditoria de cada execucao.
     if record and ("TESTE" in record.nome_esperado.upper() or record.email.endswith("@example.com")):
         raise ConfigurationError("Substitua os dados de exemplo antes do modo live")
     hostname = (urlparse(config.base_url).hostname or "").lower()
