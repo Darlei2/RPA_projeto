@@ -635,6 +635,10 @@ def operate(
             report["pending"].append(
                 "campo_ambiguo:" + key
             )
+            # Rotulos dos candidatos (texto do formulario, nunca valores) para o diagnostico.
+            # (lista de textos: a auditoria redige chaves como "logradouro"/"cep" em dicionarios)
+            report.setdefault("ambiguous", []).append(key + ": " + " | ".join(
+                str(f.get("label") or f.get("name") or f.get("id") or "?")[:80] for f in winners))
         else:
             selected[key] = winners[0]
 
@@ -798,6 +802,9 @@ def operate(
                 report["pending"].append(
                     "campo_nao_editavel:" + key
                 )
+                # So o estado (vazio/preenchido), nunca o valor.
+                report.setdefault("non_editable", []).append(key + ": " + (
+                    "preenchido pelo PJe" if str(current["value"] or "").strip() else "vazio"))
             continue
 
         if current["type"] in ("checkbox", "radio"):

@@ -196,6 +196,7 @@ def processar_advogado(config: AppConfig, linha, audit_root: Path, deps: Depende
     pfx_password = ""
     res.cadastro, res.motivo = resultado.status, resultado.reason
     deps.log(f"Cadastro: {resultado.status} - {resultado.reason}")
+    _mostrar_diagnostico(audit_root, resultado, deps.log)
 
     pode_senha = resultado.status == "COMPLETED" or (
         resultado.status == "ALREADY_REGISTERED" and nova_senha_se_ja_cadastrado)
@@ -215,6 +216,30 @@ def processar_advogado(config: AppConfig, linha, audit_root: Path, deps: Depende
     res.credencial = deps.credencial(config, audit_root, lawyer, inbox, secret_2fa)
     secret_2fa = ""
     return res
+
+
+def _mostrar_diagnostico(audit_root: Path, resultado, log) -> None:
+    """Quando o cadastro para, mostra onde esta o print e o que o formulario tinha de diferente."""
+    import json
+
+    if resultado.status not in ("NEEDS_HUMAN", "FAILED", "BLOCKED") or not getattr(resultado, "run_id", ""):
+        return
+    run_dir = audit_root / resultado.run_id
+    for shot in sorted(run_dir.glob("tela-*.png")):
+        log(f"  Print da tela: {shot}")
+    try:
+        for line in (run_dir / "audit.jsonl").read_text(encoding="utf-8").splitlines():
+            event = json.loads(line)
+            details = event.get("details") or {}
+            if event.get("event") == "adaptive_form_evaluated":
+                for item in details.get("ambiguous") or []:
+                    key, _, labels = str(item).partition(": ")
+                    log(f"  Campo '{key}' ambiguo, candidatos: {labels}")
+                for item in details.get("non_editable") or []:
+                    key, _, state = str(item).partition(": ")
+                    log(f"  Campo '{key}' bloqueado para edicao ({state})")
+    except (OSError, ValueError):
+        pass
 
 
 def executar_lote(config: AppConfig, linhas: list, audit_root: Path, saida: Path, deps: Dependencias, *,

@@ -375,10 +375,25 @@ class PJeRegistrationFlow:
         self.audit.record(event, state.value, details)
 
     def _blocked(self, reason: str) -> RunResult:
+        self._capture("bloqueio")
         self._transition(FlowState.BLOCKED, "flow_blocked", {"reason": reason})
         return self._result(RunStatus.BLOCKED, reason)
 
+    def _capture(self, tag: str) -> None:
+        """Print da tela na pasta da auditoria (runtime\\audit\\<execucao>, fora do Git) para
+        entender por que o fluxo parou. Fica so nesta maquina."""
+        page = getattr(self.browser, "page", None)
+        if page is None:
+            return
+        name = f"tela-{tag}.png"
+        try:
+            page.screenshot(path=str(self.audit.run_dir / name), full_page=True)
+        except Exception:  # noqa: BLE001 - sem print, segue com o resto do diagnostico
+            return
+        self.audit.record("screen_captured", self.state.value, {"file": name})
+
     def _failed(self, reason: str) -> RunResult:
+        self._capture("falha")
         details: dict = {"reason": reason}
         # Registra a estrutura da tela (titulos, rotulos, botoes; nunca valores digitados,
         # numeros e nome mascarados) para entender e homologar a etapa que falhou.
@@ -404,7 +419,13 @@ class PJeRegistrationFlow:
         return text
 
     def _needs_human(self, reason: str) -> RunResult:
-        self.audit.record("human_action_pending", self.state.value, {"reason": reason})
+        self._capture("revisao")
+        details: dict = {"reason": reason}
+        try:
+            details["page"] = self._scrub(self.browser.outline())
+        except Exception:  # noqa: BLE001
+            pass
+        self.audit.record("human_action_pending", self.state.value, details)
         return self._result(RunStatus.NEEDS_HUMAN, reason)
 
     def _result(self, status: RunStatus, reason: str) -> RunResult:
