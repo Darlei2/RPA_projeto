@@ -35,6 +35,9 @@ COLUNAS: dict[str, tuple[str, ...]] = {
     "bairro": ("bairro",),
     "cidade": ("cidade", "municipio"),
     "uf": ("uf", "estado", "uf_endereco"),
+    "rg_numero": ("rg", "rg_numero", "numero_rg", "identidade", "numero_identidade"),
+    "rg_orgao": ("rg_orgao", "orgao_rg", "orgao_expedidor", "orgao_emissor", "orgao_expedicao_rg"),
+    "rg_data_expedicao": ("rg_data_expedicao", "data_expedicao_rg", "data_rg", "data_expedicao"),
     "autorizacao_ref": ("autorizacao_ref", "autorizacao", "referencia_autorizacao", "termo_autorizacao"),
     "certificado": ("certificado", "arquivo_certificado", "pfx", "caminho_pfx", "certificado_a1"),
     "senha_certificado": ("senha_certificado", "senha_do_certificado", "senha_pfx", "senha_a1"),
@@ -158,6 +161,12 @@ def _zeros(value: str, size: int) -> str:
     return digits.zfill(size) if digits and len(digits) < size else (value or "")
 
 
+def _data(value: str) -> str:
+    """Excel guarda data como "2015-03-20 00:00:00": devolve dd/mm/aaaa."""
+    m = re.match(r"^(\d{4})-(\d{2})-(\d{2})", value or "")
+    return f"{m.group(3)}/{m.group(2)}/{m.group(1)}" if m else (value or "")
+
+
 def _validar(numero_linha: int, dados: dict[str, str], base: Path) -> LinhaAdvogado:
     dados = {**dados, "cpf": _zeros(dados.get("cpf", ""), 11), "cep": _zeros(dados.get("cep", ""), 8)}
     linha = LinhaAdvogado(numero_linha, dados)
@@ -170,6 +179,9 @@ def _validar(numero_linha: int, dados: dict[str, str], base: Path) -> LinhaAdvog
             "email": dados.get("email", ""),
             "telefone": dados.get("telefone", ""),
             "autorizacao_ref": dados.get("autorizacao_ref", ""),
+            "rg_numero": dados.get("rg_numero", ""),
+            "rg_orgao": dados.get("rg_orgao", ""),
+            "rg_data_expedicao": _data(dados.get("rg_data_expedicao", "")),
             "endereco": {k: dados.get(k, "") for k in
                          ("cep", "logradouro", "numero", "complemento", "bairro", "cidade", "uf")},
         })
@@ -197,10 +209,12 @@ def gravar_modelo(destino: Path) -> Path:
     from openpyxl.styles import Font, PatternFill
 
     cabecalho = ["nome", "cpf", "oab_numero", "oab_uf", "email", "telefone", "cep", "logradouro",
-                 "numero", "complemento", "bairro", "cidade", "uf", "autorizacao_ref", "certificado",
+                 "numero", "complemento", "bairro", "cidade", "uf", "rg_numero", "rg_orgao",
+                 "rg_data_expedicao", "autorizacao_ref", "certificado",
                  "senha_certificado", "chave_2fa", "imap_servidor", "imap_usuario", "imap_senha", "executar"]
     exemplo = ["ADVOGADO DE TESTE", "52998224725", "12345", "BA", "advogado@exemplo.com.br", "71999999999",
-               "40000000", "RUA DE TESTE", "100", "", "CENTRO", "SALVADOR", "BA", "CONTRATO-123",
+               "40000000", "RUA DE TESTE", "100", "", "CENTRO", "SALVADOR", "BA", "1234567", "SSP/BA",
+               "20/03/2015", "CONTRATO-123",
                "", "", "", "imap.gmail.com", "", "", "N"]
     wb = Workbook()
     ws = wb.active
@@ -220,6 +234,7 @@ def gravar_modelo(destino: Path) -> Path:
     for texto in (
         "Uma linha por advogado. A linha de exemplo esta com executar = N (sera ignorada).",
         "Obrigatorias: nome, cpf, oab_numero, oab_uf, email, telefone, cep, logradouro, numero, bairro, cidade, uf.",
+        "rg_numero, rg_orgao (ex.: SSP/RJ, DETRAN/RJ), rg_data_expedicao (dd/mm/aaaa): OPCIONAIS, mas os TRTs exigem.",
         "autorizacao_ref: referencia do documento em que o advogado autoriza o uso do A1 (obrigatoria no modo real).",
         "certificado: VAZIO = usa o A1 ja instalado no Windows com o CPF da linha (sem .pfx e sem senha).",
         "certificado: thumbprint (40 letras/numeros) = usa aquele certificado instalado no Windows.",

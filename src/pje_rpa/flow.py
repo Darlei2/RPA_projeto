@@ -52,6 +52,7 @@ class PJeRegistrationFlow:
         self.rehearsal = rehearsal
         # Execucao em lote (lote.py) cuida da senha com a caixa de e-mail: aqui so cadastra.
         self.request_password = request_password
+        self._sem_dado: list[str] = []
         # Modo assistido (lote): recebe o relatorio do formulario e devolve
         # "reavaliar", "seguir" ou "parar". None = sem operador (para para revisao).
         self.assist = assist
@@ -137,40 +138,8 @@ class PJeRegistrationFlow:
             return self._failed("Formulario de cadastro nao localizado apos autenticacao")
         self._transition(FlowState.REGISTRATION_FORM, "registration_form_detected")
         if hasattr(self.browser, "page"):
-            from .adaptive_form import operate
-
-            # Campos fixados no .toml do tribunal: campo_uf = ["id=..."] / ["name=..."] / ["label=..."]
-            overrides = {k[len("campo_"):]: v for k, v in self.config.selectors.items() if k.startswith("campo_")}
-            rounds = 0
-            while True:
-                report = operate(self.browser.page, self.record, **({"overrides": overrides} if overrides else {}))
-                self._preserve_address(report)
-                if report.get("unverified") and not self.rehearsal:
-                    report["pending"].extend(
-                        "verificacao_obrigatoria:" + key
-                        for key in report["unverified"]
-                    )
-                self.audit.record("adaptive_form_evaluated", self.state.value, report)
-
-                if report["blocked"]:
-                    # Identidade divergente nunca e liberada pelo modo assistido.
-                    return self._blocked("Divergencia encontrada: " + ", ".join(report["blocked"]))
-                if not report["pending"]:
-                    break
-
-                # Modo assistido: o operador resolve no Edge aberto e o robo reavalia, ou confirma
-                # que o formulario esta certo e o robo segue. Sem operador: para para revisao.
-                decision = self.assist(report) if (self.assist and rounds < 5) else "parar"
-                rounds += 1
-                if decision == "reavaliar":
-                    self.audit.record("operator_fixed_form", self.state.value, {"round": rounds})
-                    continue
-                if decision == "seguir":
-                    self.audit.record("operator_confirmed_form", self.state.value,
-                                      {"pending_accepted": report["pending"]})
-                    break
-                self._transition(FlowState.REVIEW, "adaptive_review_pending", report)
-                return self._needs_human("Revisao necessaria: " + ", ".join(report["pending"]))
+            if (stop := self._adaptive_form()) is not None:
+                return stop
         else:
             if mismatch := self._identity_mismatch():
                 return self._blocked(mismatch)
@@ -180,32 +149,92 @@ class PJeRegistrationFlow:
 
         # Botao de avancar: seletor homologado ou, se nao houver, o botao reconhecido
         # pelo texto (cada PJe usa um rotulo). O ensaio tambem valida esta etapa.
-        advance = self._locate_action("confirm_data", "advance")
-        if advance is None or "ambiguous" in advance:
-            return self._failed(self._action_problem("avancar o formulario", advance))
-        self.audit.record("advance_button_located", self.state.value,
-                          {"text": advance["text"], "source": advance["source"]})
+        for attempt in range(1, 4):
+            advance = self._locate_action("confirm_data", "advance")
+            if advance is None or "ambiguous" in advance:
+                return self._failed(self._action_problem("avancar o formulario", advance))
+            self.audit.record("advance_button_located", self.state.value,
+                              {"text": advance["text"], "source": advance["source"]})
 
-        if self.rehearsal:
-            self.audit.record("rehearsal_stopped_before_submit", self.state.value)
-            return self._result(
-                RunStatus.REHEARSAL_OK,
-                f"Ensaio concluido: o robo clicaria em '{advance['text']}'. "
-                "Nada foi enviado nem assinado",
-            )
+            if self.rehearsal:
+                self.audit.record("rehearsal_stopped_before_submit", self.state.value)
+                aviso = ""
+                if self._sem_dado:
+                    aviso = (". ATENCAO: campo(s) sem dado na planilha (o PJe pode exigir ao enviar): "
+                             + ", ".join(self._sem_dado))
+                return self._result(
+                    RunStatus.REHEARSAL_OK,
+                    f"Ensaio concluido: o robo clicaria em '{advance['text']}'. "
+                    "Nada foi enviado nem assinado" + aviso,
+                )
 
-        self._click_action("confirm_data", "advance", advance)
-        self.audit.record("advance_button_clicked", self.state.value, {"text": advance["text"]})
-        if blocked := self._blocked_reason():
-            return self._blocked(blocked)
-        if not self.browser.visible("commitment_term", 15000):
+            self._click_action("confirm_data", "advance", advance)
+            self.audit.record("advance_button_clicked", self.state.value, {"text": advance["text"]})
+            if blocked := self._blocked_reason():
+                return self._blocked(blocked)
+            if self.browser.visible("commitment_term", 15000):
+                break
             messages = self._page_messages()
+            # O PJe devolveu o formulario (ex.: TRT: "campo obrigatorio" em RG e confirmacao de
+            # e-mail): reavalia, preenche o que tiver dado e, no modo assistido, pausa para o resto.
+            if (attempt < 3 and hasattr(self.browser, "page")
+                    and self.browser.visible("registration_form", 3000)):
+                self.audit.record("form_returned_by_pje", self.state.value,
+                                  {"attempt": attempt, "messages": messages})
+                if (stop := self._adaptive_form(after_submit=True)) is not None:
+                    return stop
+                continue
             if messages:
                 return self._needs_human("O PJe recusou o formulario: " + " | ".join(messages))
             return self._failed("Termo de compromisso nao localizado apos avancar o formulario")
         self._transition(FlowState.COMMITMENT_TERM, "commitment_term_detected",
                          {"autorizacao_ref": self.record.autorizacao_ref})
         return self._sign_commitment()
+
+    def _adaptive_form(self, after_submit: bool = False) -> RunResult | None:
+        """Avalia e preenche o formulario; None = pode avancar, senao o resultado da parada."""
+        from .adaptive_form import operate
+
+        # Campos fixados no .toml do tribunal: campo_uf = ["id=..."] / ["name=..."] / ["label=..."]
+        overrides = {k[len("campo_"):]: v for k, v in self.config.selectors.items() if k.startswith("campo_")}
+        rounds = 0
+        while True:
+            report = operate(self.browser.page, self.record, **({"overrides": overrides} if overrides else {}))
+            self._preserve_address(report)
+            if report.get("unverified") and not self.rehearsal:
+                report["pending"].extend(
+                    "verificacao_obrigatoria:" + key
+                    for key in report["unverified"]
+                )
+            self.audit.record("adaptive_form_evaluated", self.state.value, report)
+
+            if report["blocked"]:
+                # Identidade divergente nunca e liberada pelo modo assistido.
+                return self._blocked("Divergencia encontrada: " + ", ".join(report["blocked"]))
+            if not report["pending"]:
+                break
+
+            # Modo assistido: o operador resolve no Edge aberto e o robo reavalia, ou confirma
+            # que o formulario esta certo e o robo segue. Sem operador: para para revisao.
+            decision = self.assist(report) if (self.assist and rounds < 5) else "parar"
+            rounds += 1
+            if decision == "reavaliar":
+                self.audit.record("operator_fixed_form", self.state.value, {"round": rounds})
+                continue
+            if decision == "seguir":
+                self.audit.record("operator_confirmed_form", self.state.value,
+                                  {"pending_accepted": report["pending"]})
+                break
+            self._transition(FlowState.REVIEW, "adaptive_review_pending", report)
+            return self._needs_human("Revisao necessaria: " + ", ".join(report["pending"]))
+        self._sem_dado = list(report.get("sem_dado", []))
+        if after_submit and rounds == 0 and not report["filled"]:
+            # Nada novo para preencher e nada pendente: o PJe recusou por outro motivo.
+            messages = self._page_messages()
+            self._capture("falha")
+            return self._needs_human("O PJe devolveu o formulario sem indicar o campo"
+                                     + (": " + " | ".join(messages) if messages else ""))
+        return None
 
     def _sign_commitment(self) -> RunResult:
         sign = self._locate_action("sign_term", "sign")

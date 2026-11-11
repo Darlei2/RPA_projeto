@@ -236,6 +236,10 @@ def _assistente(report: dict, deps: Dependencias, rehearsal: bool) -> str:
     for key, titulo in ROTULOS_PENDENCIA:
         for item in report.get(key) or []:
             deps.log(f"      {titulo}: {item}")
+    sem_dado = [p.split(":", 1)[1] for p in report.get("pending", []) if p.startswith("campo_obrigatorio_sem_dado:")]
+    if sem_dado:
+        deps.log("      O PJe exige campo(s) que a planilha nao tem: " + ", ".join(sem_dado) + ". Preencha no Edge"
+                 " agora e, para as proximas vezes, use as colunas rg_numero / rg_orgao / rg_data_expedicao.")
     deps.log("      O Edge esta aberto nessa tela. Voce pode preencher/corrigir o que faltar direto nele.")
     seguir = "continuar ate parar antes de enviar (ensaio)" if rehearsal else "continuar e ENVIAR o cadastro"
     while True:

@@ -127,6 +127,9 @@ def lawyer_from_dict(raw: dict) -> LawyerRecord:
             uf=str(address.get("uf", "")).strip().upper(),
         ),
         autorizacao_ref=str(raw.get("autorizacao_ref", "")).strip(),
+        rg_numero=str(raw.get("rg_numero", "")).strip(),
+        rg_orgao=str(raw.get("rg_orgao", "")).strip().upper(),
+        rg_data_expedicao=str(raw.get("rg_data_expedicao", "")).strip(),
     )
     errors = validate_lawyer(record)
     if errors:

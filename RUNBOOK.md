@@ -194,6 +194,11 @@ O robo identifica cada campo pelo rotulo e pelo bloco da tela, e so preenche o q
 - empate entre dois campos: vence o que ja tem o valor certo, o que esta no bloco "Endereco" ou o mais
   proximo do CEP; sem evidencia, o robo nao chuta;
 - endereco bloqueado e ja preenchido pelo PJe (pelo CEP) e mantido como esta e registrado;
+- "E-mail (confirmacao)" recebe o mesmo e-mail; RG, orgao expedidor e data de expedicao vem das colunas
+  opcionais `rg_numero`, `rg_orgao` e `rg_data_expedicao` da planilha (os TRTs exigem);
+- PJe que so avisa "campo obrigatorio" depois de enviar (TRTs): o robo reavalia o formulario devolvido,
+  preenche o que tiver dado e, no modo assistido, pausa para o operador completar o resto no Edge;
+- o ensaio avisa quando o formulario tem campo sem dado na planilha (ex.: RG);
 - quando para, deixa print em `runtime\audit\<execucao>\tela-*.png` e mostra os rotulos envolvidos.
 
 **Modo assistido** (execucao geral, ligado por padrao): se o robo tiver duvida, ele pausa com o Edge

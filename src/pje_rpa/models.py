@@ -53,6 +53,10 @@ class LawyerRecord:
     telefone: str
     endereco: Address
     autorizacao_ref: str = ""
+    # Documento de identidade: opcional (alguns PJe, como os TRTs, exigem no cadastro)
+    rg_numero: str = ""
+    rg_orgao: str = ""
+    rg_data_expedicao: str = ""
 
     def safe_summary(self) -> dict[str, Any]:
         return {

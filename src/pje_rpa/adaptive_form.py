@@ -62,6 +62,16 @@ JS_SNAPSHOT = r"""() => {
       block?.querySelector('legend,h1,h2,h3,h4,h5,h6,.panel-heading,.panel-title,.card-header,.card-title') || null
     ).slice(0, 100);
 
+    const ownLabel = [labels, aria].filter(Boolean).join(' ') ||
+      [parentLabel, rowLabel].filter(Boolean).join(' ');
+    // Obrigatorio: atributo, "*" no rotulo ou aviso "campo obrigatorio" na mesma linha
+    // (os TRTs so mostram o aviso depois de tentar enviar).
+    const row = e.closest('tr');
+    // so a linha do proprio campo (tabela de layout aninhada: a linha mais proxima)
+    const rowWarn = row && row.querySelectorAll('input,select,textarea').length <= 3 ? txt(row) : '';
+    const marked = /\*\s*:?$/.test(ownLabel) ||
+      /campo obrigat|preenchimento obrigat/i.test(rowWarn.replace(ownLabel, ''));
+
     const options = e.tagName === 'SELECT'
       ? [...e.options].map(o => ({
           value: o.value,
@@ -77,15 +87,14 @@ JS_SNAPSHOT = r"""() => {
       name: e.name || '',
       // Rotulo proprio (<label for>, aria) primeiro; o do bloco/linha so quando nao ha rotulo
       // proprio - senao "Logradouro" herdava o "CEP" do primeiro <label> do fieldset.
-      label: [labels, aria].filter(Boolean).join(' ') ||
-        [parentLabel, rowLabel].filter(Boolean).join(' '),
+      label: ownLabel,
       section,
       title: e.title || '',
       placeholder: e.placeholder || '',
       autocomplete: e.autocomplete || '',
       value: e.value || '',
       required: !!e.required ||
-        e.getAttribute('aria-required') === 'true',
+        e.getAttribute('aria-required') === 'true' || marked,
       readonly: !!e.readOnly,
       disabled: !!e.disabled,
       checked: !!e.checked,
@@ -251,6 +260,10 @@ PATTERNS = {
     "cpf": r"\bcpf\b",
     "oab": r"\boab\b|\binscricao profissional\b|\binscricao principal\b",
     "email": r"\be.?mail\b|\bcorreio eletronico\b",
+    "email_confirm": r"\be.?mail\b.*\bconfirma|\bconfirm\w* (?:o |do |de )?e.?mail\b|\brepit\w* .*e.?mail\b",
+    "rg_numero": r"\b(?:rg|identidade|registro geral)\b",
+    "rg_orgao": r"\borgao\b.*\b(?:expedi\w*|emissor|emissao)\b|\b(?:orgao|emissor) (?:do )?rg\b",
+    "rg_data": r"\bdata\b.*\b(?:expedicao|emissao)\b",
     "ddd": r"\bddd\b",
     "phone": r"\btelefone\b|\bcelular\b|\bfone\b",
     "cep": r"\bcep\b|\bcodigo postal\b",
@@ -294,6 +307,24 @@ UF_NAMES = {
 
 IDENTITY = ("nome", "cpf", "oab")
 
+# Quando dois padroes batem no mesmo rotulo, o mais especifico vence:
+# "E-mail (confirmacao)" e confirmacao, nao o e-mail; "Numero do RG" e RG, nao o numero da casa.
+DOMINATES = {
+    # "Endereco de e-mail" e e-mail, nao logradouro
+    "email": {"logradouro"},
+    "email_confirm": {"email", "logradouro"},
+    "rg_data": {"rg_numero", "rg_orgao"},
+    "rg_orgao": {"rg_numero"},
+    "rg_numero": {"address_number"},
+    # "UF do RG"/"UF do orgao expedidor": e uma UF (de outro assunto, tratada em other_subject)
+    "uf": {"rg_numero", "rg_orgao"},
+}
+
+
+def _specific(matches: list[str]) -> list[str]:
+    dropped = set().union(*(DOMINATES.get(m, set()) for m in matches)) if matches else set()
+    return [m for m in matches if m not in dropped]
+
 
 def field_key(
     field: dict[str, Any]
@@ -320,20 +351,20 @@ def field_key(
         )
     ))
 
-    matches = [
+    matches = _specific([
         key for key, pattern in PATTERNS.items()
         if re.search(pattern, captions)
-    ]
+    ])
 
     if len(matches) == 1:
         return matches[0], 80
 
     ids = norm(" ".join((ident, name)))
 
-    matches = [
+    matches = _specific([
         key for key, pattern in PATTERNS.items()
         if re.search(pattern, ids)
-    ]
+    ])
 
     if len(matches) == 1:
         return matches[0], 50
@@ -429,6 +460,10 @@ def desired(record: Any) -> dict[str, str]:
             f"{record.oab_numero}/{record.oab_uf}"
         ),
         "email": record.email,
+        "email_confirm": record.email,
+        "rg_numero": getattr(record, "rg_numero", ""),
+        "rg_orgao": getattr(record, "rg_orgao", ""),
+        "rg_data": getattr(record, "rg_data_expedicao", ""),
         "phone": (
             phone[2:]
             if len(phone) in (10, 11)
@@ -549,6 +584,12 @@ def same(
 
     if key in ("logradouro", "complemento"):
         return address_equivalent(key, actual, expected)
+
+    if key == "rg_data":
+        return numbers(actual) == numbers(expected)
+
+    if key in ("rg_numero", "rg_orgao"):
+        return re.sub(r"[^0-9a-z]", "", norm(actual)) == re.sub(r"[^0-9a-z]", "", norm(expected))
 
     return norm(actual) == norm(expected)
 
@@ -856,14 +897,25 @@ def operate(
         "cidade",
         "uf",
         "email",
+        "email_confirm",
         "ddd",
         "phone",
+        "rg_numero",
+        "rg_orgao",
+        "rg_data",
     ]
 
     for key in ordered:
         value = expected[key]
 
         if not value:
+            field = selected.get(key)
+            if field is not None and not has_value(field) and not field.get("readonly"):
+                if field.get("required"):
+                    report["pending"].append("campo_obrigatorio_sem_dado:" + key)
+                else:
+                    # Ex.: RG sem coluna na planilha. Os TRTs so avisam que e obrigatorio ao enviar.
+                    report.setdefault("sem_dado", []).append(key)
             continue
 
         chosen = selected.get(key)
