@@ -261,24 +261,28 @@ def test_janela_do_proprio_formulario_de_senha_nao_e_mensagem(tmp_path):
 
 
 # ------------------------------------------- senha pelo login unico (PDPJ/Keycloak), sem e-mail
-KC_FORM = """<html><meta charset=utf-8><body><form id=f>
- <input type=text id=username name=username value=x style="display:none">
- <input type=password id=password name=password style="display:none">
+# Tema do PDPJ: a troca de senha abre numa janela por cima da tela de login (CPF/senha/"Entrar"
+# continuam visiveis atras) e a janela demora um instante para aparecer.
+KC_FORM = """<html><meta charset=utf-8><body>
+<form id=kc-form-login onsubmit="window.errado=1;return false">
+ <input type=text id=username name=username><input type=password id=password name=password>
+ <input type=submit id=kc-login value=Entrar></form>
+<div id=panelNovaSenha class=rich-mpnl style="display:none"><h3>Nova senha</h3><form id=f>
  <label for=password-new>Nova senha</label><input type=password id=password-new name=password-new>
  <label for=password-confirm>Confirme a senha</label><input type=password id=password-confirm name=password-confirm>
- <input type=checkbox id=logout-sessions checked>
+ <input type=checkbox id=logout-sessions checked> Sair dos outros dispositivos
  <div id=erro class="alert-error" style="display:none"></div>
  <button type=submit name=cancel-aia value=true>Cancelar</button><input type=submit value=Enviar>
-</form><script>
+</form></div><script>
+setTimeout(() => document.getElementById('panelNovaSenha').style.display = '', 1500);
 document.getElementById('f').addEventListener('submit', e => {
   e.preventDefault();
   if (e.submitter && e.submitter.name === 'cancel-aia') { location = '/painel?kc_action_status=cancelled'; return; }
   const a = document.getElementById('password-new').value, b = document.getElementById('password-confirm').value;
-  window.tentativas = (window.tentativas || 0) + 1;
   if (a !== b || a.length > 16 || !/^[A-Za-z0-9]+$/.test(a)) {
     const d = document.getElementById('erro'); d.style.display = '';
     d.innerText = 'Senha invalida: use letras, numeros e tamanho entre 8 e 16 caracteres.';
-  } else { location = '/painel?kc_action_status=success'; }
+  } else { location = '/painel?kc_action_status=success' + (window.errado ? '&errado=1' : ''); }
 });</script></body></html>"""
 
 
@@ -299,11 +303,12 @@ def test_senha_pelo_login_unico_sem_email(browser):
                  "&redirect_uri=" + quote(HOST + "/painel", safe=""))
     assert browser.sso_auth_url.endswith("|pje-teste-1g|" + HOST + "/painel") and "abc" not in browser.sso_auth_url
 
-    # sessao do login unico encerrada: o SSO mostra o login em vez da troca de senha
+    # sessao do login unico encerrada: so a tela de login, sem o campo de nova senha
     browser._context.route(HOST + "/auth/**", lambda route: route.fulfill(
-        status=200, content_type="text/html", body="<html><body><input id=username><button id=kc-login>Entrar</button></body></html>"))
+        status=200, content_type="text/html",
+        body="<html><body><input id=username><input id=password type=password><button id=kc-login>Entrar</button></body></html>"))
     caiu = set_password_via_sso(browser, browser.config, "x" * 12)
-    assert not caiu.ok and caiu.expired and "nao esta mais ativa" in caiu.detail
+    assert not caiu.ok and caiu.expired and "nao esta mais ativa" in caiu.detail and "kc-login" not in caiu.value
     browser._context.route(HOST + "/auth/**", keycloak)
 
     primeira, reserva = gerar_senha(20, especiais=False), gerar_senha(16)  # 20 e longa; a reserva tem simbolos
@@ -312,4 +317,5 @@ def test_senha_pelo_login_unico_sem_email(browser):
     assert step.value not in (primeira, reserva) and step.value.isalnum() and 8 <= len(step.value) <= 16
     assert step.tried[:2] == (primeira, reserva) and step.tried[-1] == step.value
     assert browser.kc_action_status == "success"
+    assert "errado=1" not in browser.page.url  # nunca clicou no "Entrar" da tela de login atras
     assert step.value not in step.detail

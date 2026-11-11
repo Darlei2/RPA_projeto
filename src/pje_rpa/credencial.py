@@ -303,6 +303,45 @@ def _fit_rule(browser, candidates: list[str]) -> list[str]:
     return extra + candidates
 
 
+# Botao de enviar a partir de um campo: sobe pelos blocos ate achar botoes que nao sejam de
+# cancelar/fechar/voltar. Marca o escolhido para o clique.
+JS_SUBMIT_FROM = r"""(sel) => {
+  const vis = e => !!(e.getClientRects().length) && getComputedStyle(e).visibility !== 'hidden';
+  const campo = document.querySelector(sel);
+  if (!campo) return false;
+  const bad = /cancel|fechar|voltar|limpar|sair|ir para|desistir|mostrar|exibir|ocultar/i;
+  let box = campo.closest('form') || campo.parentElement;
+  while (box) {
+    const btns = [...box.querySelectorAll('button,input[type=submit],input[type=button],a[role=button],a.btn')]
+      .filter(b => vis(b) && !b.disabled && b.name !== 'cancel-aia'
+        && !bad.test(((b.innerText || b.value || b.title || '') + ' ' + (b.name || '')).trim()));
+    if (btns.length) {
+      document.querySelectorAll('[data-pje-rpa-submit]').forEach(e => e.removeAttribute('data-pje-rpa-submit'));
+      (btns.find(b => (b.type || '').toLowerCase() === 'submit') || btns[btns.length - 1])
+        .setAttribute('data-pje-rpa-submit', '1');
+      return true;
+    }
+    if (box.tagName === 'FORM') return false;  // nao sai do formulario do campo
+    box = box.parentElement;
+  }
+  return false;
+}"""
+
+
+def _where(browser) -> str:
+    """Onde o navegador esta (endereco, botoes e campos da tela), sem valores nem dados pessoais."""
+    try:
+        parsed = urlparse(browser.page.url)
+        info = browser.outline() if hasattr(browser, "outline") else {}
+        buttons = (info.get("buttons") or [])[:6]
+        inputs = [i.get("id") or i.get("name") for i in (info.get("inputs") or []) if i.get("id") or i.get("name")][:8]
+        return (f" (tela: {parsed.netloc}{parsed.path}"
+                + (f"; botoes: {', '.join(buttons)}" if buttons else "")
+                + (f"; campos: {', '.join(inputs)}" if inputs else "") + ")")
+    except Exception:  # noqa: BLE001
+        return ""
+
+
 def set_password_via_sso(browser, config, password: str, fallback_password: str | None = None) -> StepResult:
     """Senha pelo login unico (PDPJ/Keycloak), SEM e-mail.
 
@@ -326,35 +365,37 @@ def set_password_via_sso(browser, config, password: str, fallback_password: str 
         page.goto(url, timeout=30000, wait_until="domcontentloaded")
     except Exception:  # noqa: BLE001 - redirecionamentos em cadeia: o que vale e a tela que ficar
         pass
-    deadline = time.monotonic() + 20
-    offered = False
-    while time.monotonic() < deadline and not offered:
+    # No tema do PDPJ a troca de senha abre numa janela POR CIMA da tela de login (os campos de
+    # CPF/senha e o botao "Entrar" continuam visiveis atras). Por isso o que decide e a presenca
+    # do campo "Nova senha"; a tela de login so significa sessao encerrada se ele nao existir.
+    start = time.monotonic()
+    offered, first_seen = False, None
+    while time.monotonic() - start < 25:
         try:
-            offered = novo.is_visible()
-        except Exception:  # noqa: BLE001
-            offered = False
-        if offered or getattr(browser, "kc_action_status", ""):
-            break
-        try:
-            # tela de login do SSO (CPF/senha ou certificado): a sessao do login unico acabou
-            if page.locator("#kc-pje-office, #kc-login, input#username:visible").first.is_visible():
-                failed = StepResult(False, "A sessao do login unico nao esta mais ativa (pediu login de novo)")
+            exists = novo.count() > 0
+            if exists and novo.is_visible():
+                offered = True
+                break
+            if exists:  # janela ainda abrindo: espera um pouco e segue mesmo assim
+                first_seen = first_seen or time.monotonic()
+                if time.monotonic() - first_seen > 8:
+                    offered = True
+                    break
+            elif getattr(browser, "kc_action_status", ""):
+                break
+            elif time.monotonic() - start > 8 and page.locator(
+                    "#kc-pje-office:visible, input#username:visible").count():
+                failed = StepResult(False, "A sessao do login unico nao esta mais ativa (pediu login de novo)"
+                                    + _where(browser))
                 failed.expired = True
                 return failed
-        except Exception:  # noqa: BLE001
+        except Exception:  # noqa: BLE001 - pagina navegando
             pass
         page.wait_for_timeout(400)
     if not offered:
         status = getattr(browser, "kc_action_status", "")
-        where = ""
-        try:
-            parsed = urlparse(page.url)
-            buttons = (browser.outline().get("buttons") or [])[:5] if hasattr(browser, "outline") else []
-            where = f" (tela: {parsed.netloc}{parsed.path}" + (f"; botoes: {', '.join(buttons)}" if buttons else "") + ")"
-        except Exception:  # noqa: BLE001
-            pass
         return StepResult(False, "O login unico nao ofereceu a troca de senha"
-                          + (f" (resposta: {status})" if status else "") + where)
+                          + (f" (resposta: {status})" if status else "") + _where(browser))
     candidates = _fit_rule(browser, [p for p in (password, fallback_password) if p])
     tried: list[str] = []
     last = StepResult(False, "O login unico nao aceitou a nova senha")
@@ -362,11 +403,15 @@ def set_password_via_sso(browser, config, password: str, fallback_password: str 
         candidate = candidates.pop(0)
         tried.append(candidate)
         try:
-            novo.fill(candidate, timeout=5000)
-            if confirma.count():
-                confirma.fill(candidate, timeout=5000)
-            page.locator("form input[type=submit]:not([name='cancel-aia']), "
-                         "form button[type=submit]:not([name='cancel-aia'])").first.click(timeout=5000)
+            for campo in ([novo, confirma] if confirma.count() else [novo]):
+                try:
+                    campo.fill(candidate, timeout=5000)
+                except Exception:  # noqa: BLE001 - janela em transicao: preenche assim mesmo
+                    campo.fill(candidate, timeout=3000, force=True)
+            # botao de enviar da MESMA janela do campo (nunca o "Entrar" da tela de login atras)
+            if not page.evaluate(JS_SUBMIT_FROM, "#password-confirm" if confirma.count() else "#password-new"):
+                raise LookupError("botao de enviar")
+            page.locator("[data-pje-rpa-submit]").first.click(timeout=5000)
         except Exception as exc:  # noqa: BLE001 - a mensagem do Playwright traz o valor digitado
             last = StepResult(False, f"Nao foi possivel enviar a nova senha no login unico ({type(exc).__name__})")
             break
