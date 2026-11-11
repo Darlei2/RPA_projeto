@@ -38,6 +38,7 @@ class PJeRegistrationFlow:
         code_provider: CodeProvider,
         rehearsal: bool = False,
         request_password: bool = True,
+        assist: Callable[[dict], str] | None = None,
     ) -> None:
         self.config = config
         self.record = record
@@ -51,6 +52,9 @@ class PJeRegistrationFlow:
         self.rehearsal = rehearsal
         # Execucao em lote (lote.py) cuida da senha com a caixa de e-mail: aqui so cadastra.
         self.request_password = request_password
+        # Modo assistido (lote): recebe o relatorio do formulario e devolve
+        # "reavaliar", "seguir" ou "parar". None = sem operador (para para revisao).
+        self.assist = assist
         self.state = FlowState.START
 
     def run(self) -> RunResult:
@@ -135,68 +139,38 @@ class PJeRegistrationFlow:
         if hasattr(self.browser, "page"):
             from .adaptive_form import operate
 
-            report = operate(
-                self.browser.page,
-                self.record,
-            )
+            # Campos fixados no .toml do tribunal: campo_uf = ["id=..."] / ["name=..."] / ["label=..."]
+            overrides = {k[len("campo_"):]: v for k, v in self.config.selectors.items() if k.startswith("campo_")}
+            rounds = 0
+            while True:
+                report = operate(self.browser.page, self.record, **({"overrides": overrides} if overrides else {}))
+                self._preserve_address(report)
+                if report.get("unverified") and not self.rehearsal:
+                    report["pending"].extend(
+                        "verificacao_obrigatoria:" + key
+                        for key in report["unverified"]
+                    )
+                self.audit.record("adaptive_form_evaluated", self.state.value, report)
 
-            # Preservar enderecos preexistentes em ambos os modos.
-            # Registrar divergencias sem modificar os dados do PJe.
-            prefix = "valor_preexistente_divergente:"
-            allowed = {"logradouro", "complemento"}
-            remaining = []
-            preserved_address = []
+                if report["blocked"]:
+                    # Identidade divergente nunca e liberada pelo modo assistido.
+                    return self._blocked("Divergencia encontrada: " + ", ".join(report["blocked"]))
+                if not report["pending"]:
+                    break
 
-            for issue in report.get("pending", []):
-                # "Municipio/UF" e texto fixo do PJe (endereco que ja existe no cadastro dele):
-                # o robo nao consegue alterar e, como logradouro/complemento, preserva e registra.
-                if issue == "municipio_uf_divergente":
-                    preserved_address.append("municipio_uf")
+                # Modo assistido: o operador resolve no Edge aberto e o robo reavalia, ou confirma
+                # que o formulario esta certo e o robo segue. Sem operador: para para revisao.
+                decision = self.assist(report) if (self.assist and rounds < 5) else "parar"
+                rounds += 1
+                if decision == "reavaliar":
+                    self.audit.record("operator_fixed_form", self.state.value, {"round": rounds})
                     continue
-                if isinstance(issue, str) and issue.startswith(prefix):
-                    field = issue[len(prefix):]
-                    if field in allowed:
-                        preserved_address.append(field)
-                        continue
-                remaining.append(issue)
-
-            if preserved_address:
-                report["pending"] = remaining
-                report.setdefault("preserved", []).extend(
-                    preserved_address
-                )
-                report["address_divergences_preserved"] = sorted(
-                    set(preserved_address)
-                )
-
-            if report.get("unverified") and not self.rehearsal:
-                report["pending"].extend(
-                    "verificacao_obrigatoria:" + key
-                    for key in report["unverified"]
-                )
-
-            self.audit.record(
-                "adaptive_form_evaluated",
-                self.state.value,
-                report,
-            )
-
-            if report["blocked"]:
-                return self._blocked(
-                    "Divergencia encontrada: "
-                    + ", ".join(report["blocked"])
-                )
-
-            if report["pending"]:
-                self._transition(
-                    FlowState.REVIEW,
-                    "adaptive_review_pending",
-                    report,
-                )
-                return self._needs_human(
-                    "Revisao necessaria: "
-                    + ", ".join(report["pending"])
-                )
+                if decision == "seguir":
+                    self.audit.record("operator_confirmed_form", self.state.value,
+                                      {"pending_accepted": report["pending"]})
+                    break
+                self._transition(FlowState.REVIEW, "adaptive_review_pending", report)
+                return self._needs_human("Revisao necessaria: " + ", ".join(report["pending"]))
         else:
             if mismatch := self._identity_mismatch():
                 return self._blocked(mismatch)
@@ -373,6 +347,26 @@ class PJeRegistrationFlow:
     def _transition(self, state: FlowState, event: str, details: dict | None = None) -> None:
         self.state = state
         self.audit.record(event, state.value, details)
+
+    @staticmethod
+    def _preserve_address(report: dict) -> None:
+        """Endereco que ja existe no PJe e diverge da planilha: preserva e registra (nao trava)."""
+        prefix = "valor_preexistente_divergente:"
+        allowed = {"logradouro", "complemento"}
+        remaining, preserved_address = [], []
+        for issue in report.get("pending", []):
+            # "Municipio/UF" e texto fixo do PJe: o robo nao consegue alterar.
+            if issue == "municipio_uf_divergente":
+                preserved_address.append("municipio_uf")
+                continue
+            if isinstance(issue, str) and issue.startswith(prefix) and issue[len(prefix):] in allowed:
+                preserved_address.append(issue[len(prefix):])
+                continue
+            remaining.append(issue)
+        if preserved_address:
+            report["pending"] = remaining
+            report.setdefault("preserved", []).extend(preserved_address)
+            report["address_divergences_preserved"] = sorted(set(preserved_address))
 
     def _blocked(self, reason: str) -> RunResult:
         self._capture("bloqueio")

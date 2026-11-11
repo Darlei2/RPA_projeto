@@ -165,7 +165,7 @@ def test_lote_confere_os_certificados_antes_de_comecar(tmp_path, monkeypatch):
     fake = Fake(respostas=["tjpe", str(planilha)], cadastro=["REHEARSAL_OK"])
     deps = fake.deps()
     deps.store_factory = lambda: FakeStore(_installed(_cert("MARIA DA SILVA", CPF)))
-    assert run_executar(tmp_path / "audit", tmp_path / "out", deps=deps) == 0
+    assert run_executar(tmp_path / "audit", tmp_path / "out", ensaio=True, deps=deps) == 0
     texto = "\n".join(fake.log)
     assert "certificado: Windows, AC TESTE" in texto
     assert fake.cadastros and fake.cadastros[0][1] == ""  # sem senha de certificado
@@ -173,5 +173,5 @@ def test_lote_confere_os_certificados_antes_de_comecar(tmp_path, monkeypatch):
     fake = Fake(respostas=["tjpe", str(planilha)])
     deps = fake.deps()
     deps.store_factory = lambda: FakeStore(_installed(_cert("JOSE SOUZA", OUTRO_CPF)))
-    assert run_executar(tmp_path / "audit", tmp_path / "out", deps=deps) == 2
+    assert run_executar(tmp_path / "audit", tmp_path / "out", ensaio=True, deps=deps) == 2
     assert "Nenhum certificado valido" in "\n".join(fake.log) and not fake.cadastros

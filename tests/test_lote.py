@@ -298,7 +298,8 @@ def test_varios_tribunais_em_sequencia_com_uma_entrega(pasta, monkeypatch):
     perguntas = []
     deps = fake.deps()
     deps.secret = lambda p: perguntas.append(p) or "senha-a1"
-    assert run_executar(pasta / "audit", pasta / "out", deps=deps) == 0
+    # ensaio explicito: na VM algum destes tribunais pode estar liberado para envio real
+    assert run_executar(pasta / "audit", pasta / "out", ensaio=True, deps=deps) == 0
     # ordem: tribunal por tribunal, todos os advogados em cada um
     assert [c[0] for c in fake.cadastros] == ["ADVOGADA DE TESTE", "SEGUNDO ADVOGADO"] * 3
     # a senha do certificado e pedida uma vez por advogado, nao por tribunal

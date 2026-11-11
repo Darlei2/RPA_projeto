@@ -183,3 +183,22 @@ cadastro com o A1 -> termo assinado -> "Solicitar nova senha" -> link do e-mail 
   Se preencher, proteja a planilha com senha no Excel; a pasta `planilhas\` nao vai para o Git.
 - `executar = N` pula a linha. Um advogado com erro nao para o lote.
 - Advogado ja cadastrado no tribunal: a senha so e trocada se o operador confirmar no inicio.
+
+
+## 8. Formularios diferentes em cada PJe (adaptacao)
+
+O robo identifica cada campo pelo rotulo e pelo bloco da tela, e so preenche o que tem certeza:
+
+- campos de outro assunto com rotulo parecido (UF de nascimento, UF do RG/orgao expedidor, telefone
+  comercial...) sao ignorados; "Estado civil" nao e confundido com "Estado/UF";
+- empate entre dois campos: vence o que ja tem o valor certo, o que esta no bloco "Endereco" ou o mais
+  proximo do CEP; sem evidencia, o robo nao chuta;
+- endereco bloqueado e ja preenchido pelo PJe (pelo CEP) e mantido como esta e registrado;
+- quando para, deixa print em `runtime\audit\<execucao>\tela-*.png` e mostra os rotulos envolvidos.
+
+**Modo assistido** (execucao geral, ligado por padrao): se o robo tiver duvida, ele pausa com o Edge
+aberto. Corrija o que faltar no proprio Edge e aperte Enter para ele reavaliar, ou digite C se o
+formulario ja estiver certo. Divergencia de identidade (nome, CPF, OAB) nunca passa por esse caminho.
+
+**Campo fixado**: se um tribunal sempre gerar a mesma duvida, fixe o campo no .toml dele, por exemplo
+`campo_uf = ["id=formEndereco:uf"]` dentro de `[selectors]` (veja o comentario em `_comum.toml`).

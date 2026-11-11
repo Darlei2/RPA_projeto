@@ -55,6 +55,13 @@ JS_SNAPSHOT = r"""() => {
       e.parentElement?.querySelector('label') || null
     ).slice(0, 100);
 
+    // Bloco da tela (ex.: "Endereco", "Documento de identificacao"): legenda do fieldset
+    // ou titulo do painel/cartao mais proximo. Ajuda a separar "UF do endereco" de "UF do RG".
+    const block = e.closest('fieldset,section,[class*=panel],[class*=card],[class*=secao],[class*=grupo]');
+    const section = txt(
+      block?.querySelector('legend,h1,h2,h3,h4,h5,h6,.panel-heading,.panel-title,.card-header,.card-title') || null
+    ).slice(0, 100);
+
     const options = e.tagName === 'SELECT'
       ? [...e.options].map(o => ({
           value: o.value,
@@ -68,8 +75,11 @@ JS_SNAPSHOT = r"""() => {
       type: (e.type || '').toLowerCase(),
       id: e.id || '',
       name: e.name || '',
-      label: [labels, aria, parentLabel, rowLabel]
-        .filter(Boolean).join(' '),
+      // Rotulo proprio (<label for>, aria) primeiro; o do bloco/linha so quando nao ha rotulo
+      // proprio - senao "Logradouro" herdava o "CEP" do primeiro <label> do fieldset.
+      label: [labels, aria].filter(Boolean).join(' ') ||
+        [parentLabel, rowLabel].filter(Boolean).join(' '),
+      section,
       title: e.title || '',
       placeholder: e.placeholder || '',
       autocomplete: e.autocomplete || '',
@@ -249,7 +259,7 @@ PATTERNS = {
     "complemento": r"\bcomplemento\b",
     "bairro": r"\bbairro\b",
     "cidade": r"\bcidade\b|\bmunicipio\b|\blocalidade\b",
-    "uf": r"\buf\b|\bestado\b|\bunidade federativa\b",
+    "uf": r"\buf\b|\bestado\b(?! civil)|\bunidade federativa\b",
 }
 
 UF_NAMES = {
@@ -329,6 +339,83 @@ def field_key(
         return matches[0], 50
 
     return None, 0
+
+
+ADDRESS_KEYS = ("cep", "logradouro", "address_number", "complemento", "bairro", "cidade", "uf")
+
+# Campos que parecem endereco/contato mas sao de outro assunto (RG, OAB, trabalho...).
+NOT_ADDRESS = re.compile(
+    r"\b(rg|identidade|expedi\w*|emissor|orgao emissor|oab|seccional|inscricao|naturalidade|"
+    r"nascimento|natural|profissional|trabalho|comercial|empresa|titulo de eleitor|ctps|conselho)\b"
+)
+NOT_PHONE = re.compile(r"\b(fax|recado|comercial)\b")
+
+
+def other_subject(key: str, field: dict[str, Any]) -> bool:
+    """True quando o controle trata de outro assunto apesar do rotulo parecido."""
+    text = norm(" ".join(str(field.get(k, "")) for k in ("label", "section", "title", "placeholder")))
+    if key in ADDRESS_KEYS:
+        return NOT_ADDRESS.search(text) is not None
+    if key in ("phone", "ddd"):
+        return NOT_PHONE.search(text) is not None
+    return False
+
+
+def has_value(field: dict[str, Any]) -> bool:
+    """Ja preenchido (lista com opcao escolhida que nao e "Selecione...")."""
+    value = str(field.get("value") or "").strip()
+    if not value or value in ("0", "-1"):
+        return False
+    if field.get("tag") == "select":
+        label = next((o.get("label", "") for o in field.get("options", []) if o.get("value") == value), "")
+        return not re.search(r"^(selecione|escolha|informe|--)", norm(label))
+    return True
+
+
+def pinned(field: dict[str, Any], specs: list[str]) -> bool:
+    """Campo fixado no .toml do tribunal: "id=...", "name=..." ou "label=trecho do rotulo"."""
+    for spec in specs:
+        kind, _, value = spec.partition("=")
+        value = value.strip()
+        if not value:
+            continue
+        if kind == "id" and field.get("id") == value:
+            return True
+        if kind == "name" and field.get("name") == value:
+            return True
+        if kind == "label" and norm(value) in norm(field.get("label", "")):
+            return True
+    return False
+
+
+def break_tie(key: str, winners: list[dict[str, Any]], expected: dict[str, str],
+              anchor: dict[str, Any] | None) -> dict[str, Any] | list | None:
+    """Desempata candidatos ao mesmo campo sem chutar.
+
+    1. so um ja tem o valor certo -> ele; todos ja tem o valor certo -> lista (nada a fazer);
+    2. endereco: o que esta no bloco "Endereco" ou no mesmo bloco do CEP;
+    3. endereco: o mais proximo do CEP na tela, se for unico.
+    """
+    wanted = expected.get(key, "")
+    if wanted:
+        ok = [f for f in winners if f.get("value") and same(key, f["value"], wanted)]
+        if len(ok) == len(winners):
+            return winners
+        if len(ok) == 1:
+            return ok[0]
+    if key not in ADDRESS_KEYS:
+        return None
+    in_address = [f for f in winners if re.search(r"\bendereco|residencia|domicilio\b", norm(f.get("section", "")))]
+    if len(in_address) == 1:
+        return in_address[0]
+    if anchor is not None:
+        same_block = [f for f in winners if f.get("section") and f.get("section") == anchor.get("section")]
+        if len(same_block) == 1:
+            return same_block[0]
+        distances = sorted((abs(f["index"] - anchor["index"]), i) for i, f in enumerate(winners))
+        if len(distances) > 1 and distances[0][0] < distances[1][0]:
+            return winners[distances[0][1]]
+    return None
 
 
 def desired(record: Any) -> dict[str, str]:
@@ -519,7 +606,8 @@ def option_choice(
 
 def operate(
     page: Any,
-    record: Any
+    record: Any,
+    overrides: dict[str, list[str]] | None = None,
 ) -> dict[str, Any]:
     """
     Analisa e preenche o formulario sem enviar.
@@ -566,9 +654,21 @@ def operate(
         str, list[tuple[int, dict[str, Any]]]
     ] = {}
 
+    overrides = overrides or {}
+
     # Classificar todos os controles visiveis.
     for field in controls:
         key, rank = field_key(field)
+        fixed = next((k for k, specs in overrides.items() if pinned(field, specs)), None)
+        if fixed:
+            key, rank = fixed, 1000  # fixado no .toml do tribunal: vence qualquer heuristica
+        elif key and other_subject(key, field):
+            # Ex.: "UF" do orgao expedidor do RG: nao e o endereco. Sem dado para ele.
+            report.setdefault("other_subject", []).append(
+                key + ": " + str(field.get("label") or field.get("name") or "?")[:80])
+            if field.get("required") and not str(field.get("value") or "").strip():
+                report["pending"].append("campo_obrigatorio_sem_dado:" + key)
+            continue
 
         if key is None:
             report.setdefault("unmapped_controls", []).append({
@@ -589,10 +689,16 @@ def operate(
                 key, []
             ).append((rank, field))
 
-        elif field.get("required"):
+        elif field.get("required") and not has_value(field):
+            # Obrigatorio, vazio e sem dado na planilha (ex.: estado civil): precisa de alguem.
             report["pending"].append(
                 "campo_obrigatorio_desconhecido"
             )
+            report.setdefault("unknown_required", []).append(
+                str(field.get("label") or field.get("name") or "?")[:80])
+        elif field.get("required"):
+            report.setdefault("preserved_unknown", []).append(
+                str(field.get("label") or field.get("name") or "?")[:80])
 
         elif (
             field.get("type") == "checkbox"
@@ -620,8 +726,10 @@ def operate(
 
     selected = {}
 
-    # Nao escolher arbitrariamente entre campos ambiguos.
-    for key, items in grouped.items():
+    # Nao escolher arbitrariamente entre campos ambiguos (desempate so com evidencia).
+    order = sorted(grouped, key=lambda k: (k != "cep", k))
+    for key in order:
+        items = grouped[key]
         highest = max(
             rank for rank, _ in items
         )
@@ -630,6 +738,15 @@ def operate(
             field for rank, field in items
             if rank == highest
         ]
+
+        if len(winners) > 1:
+            chosen = break_tie(key, winners, expected, selected.get("cep"))
+            if isinstance(chosen, list):
+                report["preserved"].append(key)  # todos ja estao com o valor certo
+                continue
+            if chosen is not None:
+                report.setdefault("tie_broken", []).append(key)
+                winners = [chosen]
 
         if len(winners) != 1:
             report["pending"].append(
@@ -798,6 +915,10 @@ def operate(
         if current["disabled"] or current["readonly"]:
             if same(key, current["value"], value):
                 report["preserved"].append(key)
+            elif key in ADDRESS_KEYS and str(current["value"] or "").strip():
+                # Endereco preenchido pelo PJe (ex.: pelo CEP) e bloqueado: vale o do PJe.
+                report["preserved"].append(key)
+                report.setdefault("preserved_divergent", []).append(key)
             else:
                 report["pending"].append(
                     "campo_nao_editavel:" + key

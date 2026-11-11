@@ -19,6 +19,10 @@ timeout_ms = 30000
 # Base comum a todos os tribunais. Cada tribunais\<nome>.toml faz `herda = "_comum.toml"`
 # e sobrescreve so o que for diferente naquele PJe (normalmente nada alem de [app]).
 [selectors]
+# Campos do formulario fixados por tribunal (quando a heuristica nao decide sozinha), no .toml
+# do tribunal: campo_uf = ["id=formEndereco:uf"] | ["name=..."] | ["label=trecho do rotulo"].
+# Chaves: campo_cep, campo_logradouro, campo_address_number, campo_complemento, campo_bairro,
+# campo_cidade, campo_uf, campo_email, campo_ddd, campo_phone.
 # Login: TJs/TRFs costumam redirecionar direto para o SSO (input#kc-pje-office);
 # a Justica do Trabalho mostra antes "Entrar com PDPJ" (clicado so se aparecer).
 login_sso_button = ["role=button|name=Entrar com PDPJ", "text=Entrar com PDPJ"]

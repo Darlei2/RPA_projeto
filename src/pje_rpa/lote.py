@@ -189,6 +189,8 @@ def processar_advogado(config: AppConfig, linha, audit_root: Path, deps: Depende
     # 1) Cadastro com o certificado
     deps.log("1/2 Cadastro com o certificado A1" + (" (instalado no Windows)" if linha.usa_windows else " (.pfx)"))
     kwargs = {"rehearsal": rehearsal, "notify": deps.log, "thumbprint": linha.thumbprint}
+    if deps.extras.get("assistido"):
+        kwargs["assist"] = lambda report: _assistente(report, deps, rehearsal)
     if deps.store_factory:
         kwargs["store"] = deps.store_factory()
     resultado = deps.cadastrar(config, record, pfx, pfx_password,
@@ -216,6 +218,34 @@ def processar_advogado(config: AppConfig, linha, audit_root: Path, deps: Depende
     res.credencial = deps.credencial(config, audit_root, lawyer, inbox, secret_2fa)
     secret_2fa = ""
     return res
+
+
+ROTULOS_PENDENCIA = [
+    ("ambiguous", "Campo com mais de um candidato"),
+    ("non_editable", "Campo bloqueado para edicao"),
+    ("unknown_required", "Campo obrigatorio sem dado na planilha"),
+    ("other_subject", "Campo de outro assunto (ignorado pelo robo)"),
+]
+
+
+def _assistente(report: dict, deps: Dependencias, rehearsal: bool) -> str:
+    """Modo assistido: mostra a duvida do robo e deixa o operador resolver no Edge aberto."""
+    deps.log("\n  >>> O robo tem duvida neste formulario: " + ", ".join(report.get("pending", [])))
+    for key, titulo in ROTULOS_PENDENCIA:
+        for item in report.get(key) or []:
+            deps.log(f"      {titulo}: {item}")
+    deps.log("      O Edge esta aberto nessa tela. Voce pode preencher/corrigir o que faltar direto nele.")
+    seguir = "continuar ate parar antes de enviar (ensaio)" if rehearsal else "continuar e ENVIAR o cadastro"
+    while True:
+        resposta = deps.ask(
+            "  [Enter] ja corrigi, reavaliar | [C] o formulario esta certo, " + seguir + " | [P] parar: "
+        ).strip().casefold()
+        if resposta in ("", "r", "reavaliar"):
+            return "reavaliar"
+        if resposta in ("c", "continuar", "s"):
+            return "seguir"
+        if resposta in ("p", "parar", "n"):
+            return "parar"
 
 
 def _mostrar_diagnostico(audit_root: Path, resultado, log) -> None:
@@ -441,6 +471,10 @@ def run_executar(audit_root: Path = Path("runtime/audit"), saida: Path = Path("e
         log(f"  linha {l.numero_linha}: {l.nome}  (OAB {l.record.oab_numero}/{l.record.oab_uf})  certificado: {origem}")
 
     # 4) Opcoes e confirmacao
+    if "assistido" not in deps.extras:
+        deps.extras["assistido"] = deps.yes(
+            "Modo assistido: se o robo tiver duvida num formulario, pausar para voce resolver no Edge "
+            "(em vez de pular o advogado)?", True)
     nova_senha = False
     if not ensaio:
         nova_senha = deps.yes("Se o advogado JA tiver cadastro em algum destes tribunais, criar uma NOVA senha "

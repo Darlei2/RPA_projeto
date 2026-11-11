@@ -61,6 +61,7 @@ def limpar_pendentes(audit_root: Path, store, notify: Notify = print) -> None:
 def cadastrar(config: AppConfig, record: LawyerRecord, pfx: bytes | None, pfx_password: str,
               code_provider: Callable[[str], str | None], audit_root: Path, *,
               rehearsal: bool = False, notify: Notify = print, thumbprint: str = "",
+              assist=None,
               store=None, browser_factory=None, signer_factory=None) -> ResultadoCadastro:
     """Roda o cadastro com o A1. Nao pede senha do PJe: isso e feito depois (credencial).
 
@@ -117,7 +118,7 @@ def cadastrar(config: AppConfig, record: LawyerRecord, pfx: bytes | None, pfx_pa
         signer = signer_factory(config)
         flow = PJeRegistrationFlow(config, record, info, pfx_password, browser, signer, audit,
                                    code_provider=code_provider, rehearsal=rehearsal,
-                                   request_password=False)
+                                   request_password=False, assist=assist)
         result = flow.run()
         serialized = asdict(result)
         serialized["status"] = result.status.value
