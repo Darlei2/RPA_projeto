@@ -284,99 +284,33 @@ def _campo_email_cadastro(page):
 
 JS_OBRIGATORIOS_VAZIOS = r"""() => {
   const vis = e => !!e.getClientRects().length;
-  const vazio = x => {
-    if (x.tagName === 'SELECT') {
-      const o = x.options[x.selectedIndex];
-      const t = ((o && o.text) || '').trim();
-      return !t || /^selecione/i.test(t) || /noSelection/i.test(x.value || '');
-    }
-    return !(x.value || '').trim();
-  };
   const out = [];
-  // rotulo repetido dentro da area de mensagens do PJe ("Telefone*: campo obrigatorio") nao e campo
-  const msg = '.rich-messages,.rich-message,.ui-messages-error,.alert-danger,.alert-error,[role=alert]';
   for (const rot of document.querySelectorAll('label,span,div,td,th')) {
-    if (!vis(rot) || rot.children.length > 1 || rot.closest(msg)) continue;
+    if (!vis(rot) || rot.children.length > 1) continue;
     const t = (rot.innerText || '').trim();
     if (t.length > 40 || !/\*\s*:?$/.test(t)) continue;
-    const nome = t.replace(/\s*\*\s*:?$/, '').trim();
-    if (!nome) continue;
     let box = rot.parentElement;
     for (let i = 0; i < 3 && box; i++, box = box.parentElement) {
       const campos = [...box.querySelectorAll(
         'input:not([type=hidden]):not([type=checkbox]):not([type=radio]),select,textarea')]
         .filter(x => vis(x) && (rot.compareDocumentPosition(x) & Node.DOCUMENT_POSITION_FOLLOWING));
       if (campos.length) {
-        if (vazio(campos[0])) out.push(nome);
+        if (!(campos[0].value || '').trim()) out.push(t.replace(/\s*\*\s*:?$/, ''));
         break;
       }
     }
   }
-  return [...new Set(out)].slice(0, 25);
+  return [...new Set(out)].slice(0, 12);
 }"""
 
-# Mensagens do PJe na tela do cadastro (sem o corte de 10 do leitor generico).
-JS_MENSAGENS_CADASTRO = r"""() => {
-  const vis = e => !!e.getClientRects().length && getComputedStyle(e).visibility !== 'hidden';
-  const sel = '.rich-messages,.rich-message,.ui-messages-error,.ui-message-error,.alert-danger,' +
-    '.alert-error,.erro,.error,.errors,.mensagem-erro,[role=alert],.invalid-feedback,.alert-warning';
-  const out = [];
-  for (const el of document.querySelectorAll(sel)) {
-    if (!vis(el)) continue;
-    const t = (el.innerText || '').trim().replace(/\s+/g, ' ');
-    if (t && t.length <= 300) out.push(t);
-  }
-  return [...new Set(out)].slice(0, 60);
-}"""
 
-_LEGENDA_OBRIGATORIOS = re.compile(r"^\W*campos? obrigat[oó]rios?\W*$", re.I)
-_SO_CAMPO_OBRIGATORIO = re.compile(r"^\W*campo obrigat[oó]rio\W*$", re.I)
-_RECUSA_CADASTRO = re.compile(r"obrigat|inv[aá]lid|incorret|\berro\b|n[aã]o (?:foi )?poss[ií]vel|preench", re.I)
-
-
-def _mensagens_cadastro(page) -> list[str]:
-    try:
-        brutas = list(page.evaluate(JS_MENSAGENS_CADASTRO))
-    except Exception:  # noqa: BLE001
-        return []
-    return [m for m in (str(b or "").strip() for b in brutas) if m and not _LEGENDA_OBRIGATORIOS.match(m)]
-
-
-def _obrigatorios_vazios(page) -> list[str]:
-    try:
-        vazios = [str(v) for v in page.evaluate(JS_OBRIGATORIOS_VAZIOS)]
-    except Exception:  # noqa: BLE001
-        return []
-    return [v for v in vazios if not re.search(r"e-?mail", v, re.I)]
-
-
-def _clicar_atualizar(page) -> bool:
-    for loc in (page.get_by_role("button", name=re.compile(r"^\s*atualizar\s*$", re.I)),
-                page.locator("input[type=submit][value*='Atualizar' i]"),
-                page.get_by_text(re.compile(r"^\s*atualizar\s*$", re.I))):
-        try:
-            for i in range(min(loc.count(), 3)):
-                if loc.nth(i).is_visible():
-                    loc.nth(i).click(timeout=5000)
-                    return True
-        except Exception:  # noqa: BLE001
-            continue
-    return False
-
-
-def ajustar_email_cadastral(page, base_url: str, email_desejado: str, completar=None) -> tuple[bool, str]:
+def ajustar_email_cadastral(page, base_url: str, email_desejado: str) -> tuple[bool, str]:
     """Abre 'Alteracao de dados cadastrais' (ja logado com o A1) e, se o e-mail do PJe diferir do
     desejado (o da planilha, que controlamos), troca, clica ATUALIZAR e CONFERE reabrindo o
-    formulario. Usa a SESSAO ATUAL: nao reabre nem fecha o PJe. O robo so mexe no campo de e-mail.
-
-    Cadastro antigo incompleto: o PJe recusa o ATUALIZAR enquanto houver campo obrigatorio vazio.
-    Com `completar(mensagens_do_pje, campos_vazios) -> bool` (modo assistido), o formulario fica
-    na tela com o e-mail ja digitado, o operador preenche o resto no Edge e o robo salva e confere
-    (ate 3 rodadas, sem recarregar a tela enquanto o PJe estiver recusando, para nao perder o que
-    foi digitado). `completar` devolver False = desistir deste advogado.
+    formulario. Usa a SESSAO ATUAL: nao reabre nem fecha o PJe. So mexe no campo de e-mail.
 
     Devolve (True, "e-mail ja esta correto no PJe"), (True, "e-mail do PJe atualizado ...") ou
-    (False, motivo) - no motivo vao as mensagens do PJe e os campos obrigatorios vazios (so os nomes)."""
+    (False, motivo) - no motivo vao a mensagem do PJe e os campos obrigatorios vazios (so os nomes)."""
     alvo = (email_desejado or "").strip()
     if not alvo:
         return False, "sem e-mail desejado"
@@ -388,89 +322,51 @@ def ajustar_email_cadastral(page, base_url: str, email_desejado: str, completar=
         page.wait_for_timeout(2500)
         return _campo_email_cadastro(page)
 
-    def gravou() -> bool:
-        campo = abrir()
-        return campo is not None and (campo.input_value() or "").strip().lower() == alvo.lower()
-
-    def situacao() -> tuple[list[str], bool]:
-        """Mensagens novas do PJe (fora as que a tela ja tinha) e se elas indicam recusa."""
-        novas = [m for m in _mensagens_cadastro(page) if m not in fixas]
-        return novas, any(_RECUSA_CADASTRO.search(m) for m in novas)
-
     campo = abrir()
     if campo is None:
         return False, "campo de e-mail do cadastro nao localizado"
     atual = (campo.input_value() or "").strip()
     if atual.lower() == alvo.lower():
         return True, "e-mail ja esta correto no PJe"
-    fixas = set(_mensagens_cadastro(page))  # avisos permanentes da tela: nao sao recusa
-    vazios = _obrigatorios_vazios(page)
+    try:
+        vazios = list(page.evaluate(JS_OBRIGATORIOS_VAZIOS))
+    except Exception:  # noqa: BLE001
+        vazios = []
+    vazios = [v for v in vazios if not re.search(r"e-?mail", v, re.I)]
     campo.fill(alvo)
-    if not _clicar_atualizar(page):
+    clicou = False
+    for loc in (page.get_by_role("button", name=re.compile(r"^\s*atualizar\s*$", re.I)),
+                page.locator("input[type=submit][value*='Atualizar' i]"),
+                page.get_by_text(re.compile(r"^\s*atualizar\s*$", re.I))):
+        try:
+            for i in range(min(loc.count(), 3)):
+                if loc.nth(i).is_visible():
+                    loc.nth(i).click(timeout=5000)
+                    clicou = True
+                    break
+        except Exception:  # noqa: BLE001
+            continue
+        if clicou:
+            break
+    if not clicou:
         return False, "botao ATUALIZAR nao localizado"
     page.wait_for_timeout(3000)
-    mensagens, recusou = situacao()
-
-    rodadas = 3 if completar is not None else 0
-    com_operador = False
-    while True:
-        if not recusou or completar is None:
-            # Confere de verdade: reabre o formulario e le o e-mail gravado.
-            if gravou():
-                return True, ("e-mail do PJe atualizado para o da planilha"
-                              + (" (cadastro completado com o operador)" if com_operador else ""))
-            if completar is not None:
-                # formulario recem-aberto: deixa o e-mail digitado para o operador so completar o resto
-                campo = _campo_email_cadastro(page)
-                if campo is not None:
-                    try:
-                        campo.fill(alvo)
-                    except Exception:  # noqa: BLE001
-                        pass
-                vazios = _obrigatorios_vazios(page)
-        if rodadas <= 0:
-            break
-        rodadas -= 1
-        if not completar(_resumo_mensagens(mensagens), vazios):
-            break
-        com_operador = True
-        campo = _campo_email_cadastro(page)
-        if campo is None:
-            # o operador ja salvou e saiu da tela: so resta conferir
-            mensagens, recusou = [], False
-            continue
-        try:
-            if (campo.input_value() or "").strip().lower() != alvo.lower():
-                campo.fill(alvo)
-        except Exception:  # noqa: BLE001
-            pass
-        if _clicar_atualizar(page):
-            page.wait_for_timeout(3000)
-        mensagens, recusou = situacao()
-        if recusou:
-            vazios = _obrigatorios_vazios(page)
-    if recusou and completar is not None and gravou():
-        return True, "e-mail do PJe atualizado para o da planilha (cadastro completado com o operador)"
+    try:
+        from .adaptive_form import page_messages
+        mensagens = [m for m in page_messages(page) if m][:3]
+    except Exception:  # noqa: BLE001
+        mensagens = []
+    # Confere de verdade: reabre o formulario e le o e-mail gravado.
+    campo = abrir()
+    gravado = (campo.input_value() or "").strip() if campo is not None else ""
+    if gravado.lower() == alvo.lower():
+        return True, "e-mail do PJe atualizado para o da planilha"
     motivo = "o PJe nao salvou o e-mail novo"
-    resumo = _resumo_mensagens(mensagens)
-    if resumo:
-        motivo += " (PJe: " + " | ".join(resumo) + ")"
+    if mensagens:
+        motivo += " (PJe: " + " | ".join(mensagens) + ")"
     if vazios:
         motivo += "; campos obrigatorios vazios no cadastro: " + ", ".join(vazios)
     return False, motivo
-
-
-def _resumo_mensagens(mensagens: list[str]) -> list[str]:
-    """Mensagens do PJe para mostrar: sem o 'Campo obrigatorio' solto e sem repeticao."""
-    vistos: set[str] = set()
-    saida: list[str] = []
-    for m in mensagens:
-        chave = m.casefold()
-        if _SO_CAMPO_OBRIGATORIO.match(m) or chave in vistos:
-            continue
-        vistos.add(chave)
-        saida.append(m)
-    return saida[:20]
 
 
 def set_password(browser, config, link: str, password: str, fallback_password: str | None = None) -> StepResult:

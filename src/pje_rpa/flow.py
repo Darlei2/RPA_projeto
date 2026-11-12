@@ -280,9 +280,7 @@ class PJeRegistrationFlow:
             return ""
         try:
             from .credencial import ajustar_email_cadastral
-            ok, detalhe = ajustar_email_cadastral(
-                self.browser.page, self.config.base_url, self.record.email,
-                completar=self._completar_cadastro if self.assist else None)
+            ok, detalhe = ajustar_email_cadastral(self.browser.page, self.config.base_url, self.record.email)
         except Exception as exc:  # noqa: BLE001 - cadastro ja concluido; nao pode quebrar o fluxo
             self.audit.record("email_cadastral_falhou", self.state.value, {"erro": type(exc).__name__})
             return f" | e-mail do PJe NAO conferido ({type(exc).__name__})"
@@ -296,17 +294,6 @@ class PJeRegistrationFlow:
         self.audit.record("email_cadastral_nao_alinhado", self.state.value, {"detalhe": detalhe})
         self._capture("email-cadastral")
         return " | e-mail do PJe NAO alinhado: " + detalhe
-
-    def _completar_cadastro(self, mensagens: list[str], vazios: list[str]) -> bool:
-        """Cadastro antigo incompleto: o PJe so salva o e-mail com os obrigatorios preenchidos e a
-        planilha nao tem esses dados. Pausa com o formulario aberto (sessao do A1) para o operador
-        completar no Edge. True = preencheu, o robo salva e confere; False = desistir."""
-        self._capture("email-cadastral")
-        self.audit.record("cadastro_incompleto_operador", self.state.value,
-                          {"campos_vazios": len(vazios), "mensagens": len(mensagens)})
-        decisao = self.assist({"alteracao_cadastral": True, "pending": ["cadastro_incompleto_no_pje"],
-                               "mensagens_pje": list(mensagens), "campos_vazios": list(vazios)})
-        return decisao in ("reavaliar", "seguir")
 
     def _request_password_link(self) -> str:
         """Sem senha cadastrada a credencial nao serve (so certificado/jus postulandi):

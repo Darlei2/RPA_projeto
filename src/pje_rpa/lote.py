@@ -314,8 +314,6 @@ ROTULOS_PENDENCIA = [
 
 def _assistente(report: dict, deps: Dependencias, rehearsal: bool) -> str:
     """Modo assistido: mostra a duvida do robo e deixa o operador resolver no Edge aberto."""
-    if report.get("alteracao_cadastral"):
-        return _assistente_cadastro_incompleto(report, deps)
     deps.log("\n  >>> O robo tem duvida neste formulario: " + ", ".join(report.get("pending", [])))
     for key, titulo in ROTULOS_PENDENCIA:
         for item in report.get(key) or []:
@@ -335,25 +333,6 @@ def _assistente(report: dict, deps: Dependencias, rehearsal: bool) -> str:
         if resposta in ("c", "continuar", "s"):
             return "seguir"
         if resposta in ("p", "parar", "n"):
-            return "parar"
-
-
-def _assistente_cadastro_incompleto(report: dict, deps: Dependencias) -> str:
-    """O PJe recusou trocar o e-mail porque o cadastro do advogado tem campo obrigatorio vazio."""
-    deps.log("\n  >>> O PJe nao deixou salvar o e-mail: o cadastro deste advogado neste PJe esta incompleto.")
-    for mensagem in report.get("mensagens_pje") or []:
-        deps.log("      PJe: " + mensagem)
-    vazios = report.get("campos_vazios") or []
-    if vazios:
-        deps.log("      Campos obrigatorios vazios: " + ", ".join(vazios))
-    deps.log("      O Edge esta aberto em 'Alteracao de dados cadastrais', ja logado com o A1 e com o e-mail")
-    deps.log("      da planilha digitado. Preencha no Edge os campos com * que estao vazios (a planilha nao")
-    deps.log("      tem todos esses dados). Nao precisa clicar em ATUALIZAR: o robo salva e confere.")
-    while True:
-        resposta = deps.ask("  [Enter] preenchi, salvar e conferir | [P] pular este advogado: ").strip().casefold()
-        if resposta in ("", "s", "ok"):
-            return "reavaliar"
-        if resposta in ("p", "pular", "parar", "n"):
             return "parar"
 
 
