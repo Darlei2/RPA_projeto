@@ -91,25 +91,32 @@ def _clicar_texto(page, padrao: re.Pattern) -> bool:
     return False
 
 
-def entrar_na_pagina_de_senhas_de_app(page, email: str, senha: str, chave_2fa: str,
-                                      assist: Assist | None, prazo_s: int = 120) -> str:
-    """Faz o login do Google (e-mail, senha, 2FA) ate a tela de senhas de app.
+def entrar_no_google(page, url: str, chegou: Callable[[object], bool], email: str, senha: str,
+                     chave_2fa: str, assist: Assist | None, prazo_s: int = 120,
+                     destino: str = "na tela de senhas de app",
+                     ao_digitar: Callable[[str], None] | None = None) -> str:
+    """Abre `url` e faz o login do Google (e-mail, senha, 2FA) ate `chegou(page)` ser verdadeiro.
 
-    Devolve "" quando chegou na tela, ou a senha de app que o operador digitou no modo assistido.
+    Devolve "" quando chegou, ou o que o operador digitou no modo assistido. Captcha, verificacao
+    por celular ou "navegador nao seguro": nao contorna - chama o operador ou levanta GmailError.
+    `ao_digitar("email" | "senha" | "totp")` avisa cada etapa digitada (nunca o valor).
     """
-    page.goto(APP_PASSWORDS_URL)
+    page.goto(url)
     fim = time.monotonic() + prazo_s
     ultimo_totp = ""
+    avisar = ao_digitar or (lambda etapa: None)
     while True:
-        if _campo_nome_do_app(page) is not None:
+        if chegou(page):
             return ""
         texto = _texto(page)
         if (campo := _visivel(page, "input[type=email], #identifierId")) is not None and not campo.input_value():
             campo.fill(email)
             campo.press("Enter")
+            avisar("email")
         elif (campo := _visivel(page, "input[type=password][name=Passwd], input[type=password]")) is not None:
             campo.fill(senha)
             campo.press("Enter")
+            avisar("senha")
         elif (campo := _visivel(page, "input[name=totpPin], #totpPin, input[autocomplete=one-time-code]")) is not None:
             codigo = gerar_totp(chave_2fa)
             if codigo == ultimo_totp:  # o mesmo codigo foi recusado: espera o proximo
@@ -118,22 +125,35 @@ def entrar_na_pagina_de_senhas_de_app(page, email: str, senha: str, chave_2fa: s
             ultimo_totp = codigo
             campo.fill(codigo)
             campo.press("Enter")
+            avisar("totp")
         elif _BLOQUEIO.search(texto) or time.monotonic() > fim:
             motivo = ("o Google pediu uma verificacao que o robo nao faz (captcha, celular ou navegador)"
-                      if _BLOQUEIO.search(texto) else "o login do Google nao chegou na tela de senhas de app")
+                      if _BLOQUEIO.search(texto) else "o login do Google nao chegou " + destino)
             if assist is None:
                 raise GmailError(motivo)
             resposta = assist(motivo).strip()
             if resposta:
                 return resposta
             fim = time.monotonic() + prazo_s
-            page.goto(APP_PASSWORDS_URL)
+            page.goto(url)
             continue
+        elif (conta := _visivel(page, f'[data-identifier="{email}" i]')) is not None:
+            conta.click()  # "Escolha uma conta": a sessao salva desta conta expirou
         elif _OUTRO_METODO.search(texto) and not _AUTHENTICATOR.search(texto):
             _clicar_texto(page, _OUTRO_METODO)
         elif _AUTHENTICATOR.search(texto) and _visivel(page, "input[name=totpPin], #totpPin") is None:
             _clicar_texto(page, _AUTHENTICATOR)
         page.wait_for_timeout(1500)
+
+
+def entrar_na_pagina_de_senhas_de_app(page, email: str, senha: str, chave_2fa: str,
+                                      assist: Assist | None, prazo_s: int = 120) -> str:
+    """Faz o login do Google (e-mail, senha, 2FA) ate a tela de senhas de app.
+
+    Devolve "" quando chegou na tela, ou a senha de app que o operador digitou no modo assistido.
+    """
+    return entrar_no_google(page, APP_PASSWORDS_URL, lambda p: _campo_nome_do_app(p) is not None,
+                            email, senha, chave_2fa, assist, prazo_s)
 
 
 def criar_senha_de_app(page, nome_app: str) -> str:
