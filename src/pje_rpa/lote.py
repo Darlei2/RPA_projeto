@@ -150,8 +150,7 @@ def _abrir_caixa(email: str, host: str, user: str, password: str, deps: Dependen
     if not password and email_senha and email_2fa:
         password, gerada = _senha_de_app_gmail(email, email_senha, email_2fa, deps), True
     if not password:
-        return _caixa_gmail_web(email, web_senha, web_2fa, deps,
-                                "sem senha IMAP para esta conta") or senha_cli._setup_inbox(email)
+        return _sem_imap(email, web_senha, web_2fa, deps, "sem senha IMAP para esta conta")
     inbox = ImapInbox(host=host or guess_imap_host(email) or "", user=user or email,
                       password=re.sub(r"\s", "", password))
     try:
@@ -167,14 +166,26 @@ def _abrir_caixa(email: str, host: str, user: str, password: str, deps: Dependen
             cofre_local.apagar(email)  # senha de app revogada: gera outra
             deps.log("  a senha de app guardada nao vale mais; gerando outra")
             return _abrir_caixa(email, host, user, "", deps, email_senha, email_2fa)
-        return _caixa_gmail_web(email, web_senha, web_2fa, deps,
-                                "a caixa recusou a senha IMAP") or senha_cli._setup_inbox(email)
+        return _sem_imap(email, web_senha, web_2fa, deps, "a caixa recusou a senha IMAP")
 
 
 @dataclass
 class CaixaPendente:
     """Conta sem IMAP em que o Google exigiu verificacao no login pelo navegador: fica pendente."""
     motivo: str
+
+
+def _sem_imap(email: str, senha: str, chave: str, deps: Dependencias, por_que: str):
+    """Linha sem IMAP utilizavel: vai pelo Gmail no navegador, sem perguntar. Na rota pelo e-mail,
+    se nem isso for possivel a conta fica pendente (o robo nao para para pedir senha ao operador)."""
+    from . import senha_cli
+
+    caixa = _caixa_gmail_web(email, senha, chave, deps, por_que)
+    if caixa is not None:
+        return caixa
+    if deps.extras.get("senha_via_email"):
+        return CaixaPendente(por_que + " e sem senha + chave 2FA do e-mail para a rota do navegador")
+    return senha_cli._setup_inbox(email)
 
 
 def _caixa_gmail_web(email: str, senha: str, chave: str, deps: Dependencias, por_que: str):

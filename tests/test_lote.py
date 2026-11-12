@@ -464,5 +464,9 @@ def test_via_email_pula_o_login_unico_e_nao_loga_no_gmail(pasta, monkeypatch):
     monkeypatch.setattr(gmail_web, "GmailWebInbox", CaixaWeb)
     monkeypatch.setattr(senha_cli, "_setup_inbox", lambda email: "SEM_GMAIL")
     assert isinstance(lote._abrir_caixa("x@gmail.com", "", "", "", deps, "senha-email", "CHAVE2FA"), CaixaWeb)
-    assert lote._abrir_caixa("x@gmail.com", "", "", "", deps, "", "") == "SEM_GMAIL"
-    assert lote._abrir_caixa("x@outlook.com", "", "", "", deps, "senha-email", "CHAVE2FA") == "SEM_GMAIL"
+    # sem IMAP e sem como ir pelo navegador: fica pendente, sem perguntar nada ao operador
+    assert isinstance(lote._abrir_caixa("x@gmail.com", "", "", "", deps, "", ""), lote.CaixaPendente)
+    assert isinstance(lote._abrir_caixa("x@outlook.com", "", "", "", deps, "senha-email", "CHAVE2FA"),
+                      lote.CaixaPendente)
+    deps.extras.pop("senha_via_email")  # fora da rota pelo e-mail continua perguntando
+    assert lote._abrir_caixa("x@outlook.com", "", "", "", deps, "", "") == "SEM_GMAIL"
