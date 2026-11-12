@@ -7,6 +7,7 @@ from collections.abc import Callable
 from .audit import AuditLog
 from .browser import BrowserError, BrowserPort, SimulatedBrowser
 from .certificate import CertificateInfo
+from .identidade import nomes_compativeis
 from .models import AppConfig, FlowState, LawyerRecord, RunResult, RunStatus, digits
 from .signer import SignerError, SignerPort
 
@@ -128,6 +129,9 @@ class PJeRegistrationFlow:
 
         if self.browser.visible("lawyer_panel", 2500):
             self._transition(FlowState.ALREADY_REGISTERED, "existing_profile_detected")
+            # Ja cadastrado e ainda logado com o A1: alinha o e-mail do PJe ao da planilha (para o
+            # link de senha chegar na caixa que controlamos), na mesma sessao. Best-effort.
+            self._garantir_email_cadastral()
             return self._result(RunStatus.ALREADY_REGISTERED, "Advogado ja cadastrado neste PJe")
 
         if not self.browser.visible("registration_form", 10000):
@@ -268,6 +272,20 @@ class PJeRegistrationFlow:
             reason += ". " + self._request_password_link()
         return self._result(RunStatus.COMPLETED, reason)
 
+    def _garantir_email_cadastral(self) -> None:
+        """Ja cadastrado: confere o e-mail no 'Alteracao de dados cadastrais' e, se divergir do da
+        planilha, troca (na sessao ja aberta, sem reabrir o PJe). Qualquer falha so e registrada e o
+        fluxo segue - cai no comportamento de hoje (link de senha pode ir para o e-mail antigo)."""
+        if self.rehearsal or not getattr(self.record, "email", "") or not hasattr(self.browser, "page"):
+            return
+        try:
+            from .credencial import ajustar_email_cadastral
+            ok, detalhe = ajustar_email_cadastral(self.browser.page, self.config.base_url, self.record.email)
+            self.audit.record("email_cadastral_ajustado" if ok else "email_cadastral_sem_ajuste",
+                              self.state.value, {"detalhe": detalhe})
+        except Exception as exc:  # noqa: BLE001 - cadastro ja concluido; nao pode quebrar o fluxo
+            self.audit.record("email_cadastral_falhou", self.state.value, {"erro": type(exc).__name__})
+
     def _request_password_link(self) -> str:
         """Sem senha cadastrada a credencial nao serve (so certificado/jus postulandi):
         sai do PJe e pede o link de criacao de senha para o e-mail cadastrado."""
@@ -328,7 +346,7 @@ class PJeRegistrationFlow:
         # O CPF e a ancora de identidade (conferido abaixo). O nome do certificado as vezes vem
         # sem um sobrenome (ex.: "ANA CAROLINA DE JESUS" vs "...DE JESUS ANDRADE"): aceita quando
         # um nome e subsequencia, na ordem, do outro; ainda barra quando for pessoa diferente.
-        if not _names_compatible(self.certificate.nome, self.record.nome_esperado):
+        if not nomes_compativeis(self.certificate.nome, self.record.nome_esperado):
             return "Nome do certificado diferente do nome informado"
         if self.certificate.cpf != self.record.cpf_esperado:
             return "CPF do certificado diferente do CPF informado"
@@ -357,7 +375,7 @@ class PJeRegistrationFlow:
         detected_name = self.browser.read("detected_name")
         detected_cpf = self.browser.read("detected_cpf")
         detected_oab = self.browser.read("detected_oab")
-        if _normalize_name(detected_name) != _normalize_name(self.record.nome_esperado):
+        if not nomes_compativeis(detected_name, self.record.nome_esperado):
             return "Divergencia entre o nome esperado e o retornado pelo PJe"
         if digits(detected_cpf) != self.record.cpf_esperado:
             return "Divergencia entre o CPF esperado e o retornado pelo PJe"
@@ -490,22 +508,3 @@ def _normalize_name(value: str) -> str:
     normalized = unicodedata.normalize("NFKD", value)
     ascii_text = "".join(ch for ch in normalized if not unicodedata.combining(ch))
     return " ".join(ascii_text.upper().split())
-
-
-def _names_compatible(a: str, b: str) -> bool:
-    """True quando os nomes sao a mesma pessoa, tolerando um sobrenome a menos no certificado.
-
-    Aceita se forem iguais ou se o nome mais curto for subsequencia (na ordem) do mais longo,
-    com pelo menos 2 nomes em comum. O CPF e conferido a parte e e a garantia real de identidade.
-    """
-    ta, tb = _normalize_name(a).split(), _normalize_name(b).split()
-    if not ta or not tb:
-        return False
-    if ta == tb:
-        return True
-    curto, longo = (ta, tb) if len(ta) <= len(tb) else (tb, ta)
-    i = 0
-    for token in longo:
-        if i < len(curto) and curto[i] == token:
-            i += 1
-    return i == len(curto) and len(curto) >= 2

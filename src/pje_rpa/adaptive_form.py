@@ -11,6 +11,8 @@ import re
 import unicodedata
 from typing import Any
 
+from .identidade import nomes_compativeis
+
 
 JS_SNAPSHOT = r"""() => {
   const visible = e => !!(e.getClientRects().length) &&
@@ -573,25 +575,6 @@ def oab_check(text: str, numero: str, uf: str) -> str:
     return "uf_nao_exibida"
 
 
-def _nome_subsequencia(a: str, b: str) -> bool:
-    """Mesma pessoa tolerando um sobrenome a menos (certificado/PJe as vezes truncam o nome).
-
-    Aceita nomes iguais ou quando o mais curto e subsequencia (na ordem) do mais longo, com
-    pelo menos 2 nomes em comum. O CPF e conferido a parte e e a garantia de identidade.
-    """
-    ta, tb = norm(a).split(), norm(b).split()
-    if not ta or not tb:
-        return False
-    if ta == tb:
-        return True
-    curto, longo = (ta, tb) if len(ta) <= len(tb) else (tb, ta)
-    i = 0
-    for token in longo:
-        if i < len(curto) and curto[i] == token:
-            i += 1
-    return i == len(curto) and len(curto) >= 2
-
-
 def same(
     key: str,
     actual: str,
@@ -599,7 +582,7 @@ def same(
 ) -> bool:
 
     if key == "nome":
-        return _nome_subsequencia(actual, expected)
+        return nomes_compativeis(actual, expected)
 
     if key in (
         "cpf",

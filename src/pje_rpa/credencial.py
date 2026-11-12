@@ -226,6 +226,74 @@ def request_password_link(browser, config, cpf: str, email: str) -> StepResult:
     return _fail(browser, ultimo_fail)
 
 
+def _campo_email_cadastro(page):
+    """Acha o campo de e-mail do formulario 'Alteracao de dados cadastrais' (JSF/Seam)."""
+    # 1) por rotulo "E-mail"
+    try:
+        loc = page.get_by_label(re.compile(r"e-?mail", re.I))
+        for i in range(min(loc.count(), 4)):
+            if loc.nth(i).is_visible():
+                return loc.nth(i)
+    except Exception:  # noqa: BLE001
+        pass
+    # 2) input type=email
+    try:
+        loc = page.locator("input[type=email]")
+        for i in range(min(loc.count(), 5)):
+            if loc.nth(i).is_visible():
+                return loc.nth(i)
+    except Exception:  # noqa: BLE001
+        pass
+    # 3) input de texto cujo valor atual ja parece um e-mail (contem @) - o mais robusto aqui
+    try:
+        loc = page.locator("input[type=text], input:not([type])")
+        for i in range(min(loc.count(), 40)):
+            el = loc.nth(i)
+            if el.is_visible() and "@" in (el.input_value() or ""):
+                return el
+    except Exception:  # noqa: BLE001
+        pass
+    return None
+
+
+def ajustar_email_cadastral(page, base_url: str, email_desejado: str) -> tuple[bool, str]:
+    """Abre 'Alteracao de dados cadastrais' (ja logado com o A1) e, se o e-mail do PJe diferir do
+    desejado (o da planilha, que controlamos), troca e clica ATUALIZAR. Usa a SESSAO ATUAL: nao
+    reabre nem fecha o PJe. So mexe no campo de e-mail; nao toca nos outros campos obrigatorios."""
+    alvo = (email_desejado or "").strip()
+    if not alvo:
+        return False, "sem e-mail desejado"
+    parsed = urlparse(base_url)
+    url = f"{parsed.scheme}://{parsed.netloc}/pje/PessoaAdvogado/AlteracaoCadastro/listView.seam"
+    page.goto(url, wait_until="domcontentloaded", timeout=30000)
+    page.wait_for_timeout(2500)
+    campo = _campo_email_cadastro(page)
+    if campo is None:
+        return False, "campo de e-mail do cadastro nao localizado"
+    atual = (campo.input_value() or "").strip()
+    if atual.lower() == alvo.lower():
+        return True, "e-mail ja esta correto no PJe"
+    campo.fill(alvo)
+    clicou = False
+    for loc in (page.get_by_role("button", name=re.compile(r"^\s*atualizar\s*$", re.I)),
+                page.locator("input[type=submit][value*='Atualizar' i]"),
+                page.get_by_text(re.compile(r"^\s*atualizar\s*$", re.I))):
+        try:
+            for i in range(min(loc.count(), 3)):
+                if loc.nth(i).is_visible():
+                    loc.nth(i).click(timeout=5000)
+                    clicou = True
+                    break
+        except Exception:  # noqa: BLE001
+            continue
+        if clicou:
+            break
+    if not clicou:
+        return False, "botao ATUALIZAR nao localizado"
+    page.wait_for_timeout(2500)
+    return True, "e-mail do PJe atualizado para o da planilha"
+
+
 def set_password(browser, config, link: str, password: str, fallback_password: str | None = None) -> StepResult:
     """Etapa 4: abre o link recebido por e-mail e cadastra a senha.
 
