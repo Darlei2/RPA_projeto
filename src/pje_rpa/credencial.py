@@ -253,6 +253,32 @@ def _campo_email_cadastro(page):
                 return el
     except Exception:  # noqa: BLE001
         pass
+    # 4) campo vazio (advogado sem e-mail no PJe): primeiro input que vem DEPOIS do rotulo "E-mail"
+    #    no mesmo bloco, desde que esteja vazio ou ja pareca e-mail (nunca outro campo preenchido)
+    try:
+        achou = page.evaluate(r"""() => {
+          const vis = e => !!e.getClientRects().length;
+          const rot = [...document.querySelectorAll('label,span,div,td,th')].find(e =>
+            vis(e) && e.children.length <= 1 && /^e-?mail\s*\*?\s*:?$/i.test((e.innerText || '').trim()));
+          if (!rot) return false;
+          let box = rot.parentElement;
+          for (let i = 0; i < 4 && box; i++, box = box.parentElement) {
+            const inp = [...box.querySelectorAll('input:not([type=hidden]):not([type=checkbox]):not([type=radio])')]
+              .find(x => vis(x) && (rot.compareDocumentPosition(x) & Node.DOCUMENT_POSITION_FOLLOWING));
+            if (inp) {
+              const v = (inp.value || '').trim();
+              if (v && !v.includes('@')) return false;
+              document.querySelectorAll('[data-rpa-email]').forEach(e => e.removeAttribute('data-rpa-email'));
+              inp.setAttribute('data-rpa-email', '1');
+              return true;
+            }
+          }
+          return false;
+        }""")
+        if achou:
+            return page.locator("[data-rpa-email]").first
+    except Exception:  # noqa: BLE001
+        pass
     return None
 
 

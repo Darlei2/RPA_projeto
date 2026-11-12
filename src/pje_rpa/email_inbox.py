@@ -122,6 +122,11 @@ class InboxPort(Protocol):
                                exclude: frozenset[str] = frozenset()) -> str | None: ...
 
 
+def _conectar_imap(host: str) -> imaplib.IMAP4:
+    # Sem timeout, uma caixa que nao responde deixa o robo parado para sempre (tela em branco).
+    return imaplib.IMAP4_SSL(host, timeout=30)
+
+
 @dataclass
 class ImapInbox:
     """Caixa IMAP. Para Gmail: IMAP ativo e uma senha de app (conta com verificacao em 2 etapas)."""
@@ -130,7 +135,7 @@ class ImapInbox:
     user: str
     password: str
     poll_s: int = 10
-    connect: Callable[[str], imaplib.IMAP4] = imaplib.IMAP4_SSL
+    connect: Callable[[str], imaplib.IMAP4] = _conectar_imap
 
     def check_login(self) -> None:
         conn = self.connect(self.host)

@@ -252,6 +252,7 @@ def _one_tribunal(config, audit_root: Path, lawyer: dict, inbox, secret_2fa: str
         known = frozenset()
         if inbox is not None:
             try:
+                print("Lendo a caixa de e-mail antes do pedido (ate 30 s)...")
                 known = inbox.known_links()  # o link novo tem de ser diferente dos que ja estao na caixa
             except Exception as exc:  # noqa: BLE001
                 print(f"  aviso: nao foi possivel ler a caixa antes do pedido ({type(exc).__name__})")
