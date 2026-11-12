@@ -381,6 +381,10 @@ def field_key(
 
 ADDRESS_KEYS = ("cep", "logradouro", "address_number", "complemento", "bairro", "cidade", "uf")
 
+# Divergencia SO de endereco de rua: usa o valor da planilha e segue sem parar.
+# cidade/uf ficam de fora de proposito (divergencia maior merece conferencia).
+RUA_KEYS = ("cep", "logradouro", "address_number", "complemento", "bairro")
+
 # Campos que parecem endereco/contato mas sao de outro assunto (RG, OAB, trabalho...).
 NOT_ADDRESS = re.compile(
     r"\b(rg|identidade|expedi\w*|emissor|orgao emissor|oab|seccional|inscricao|naturalidade|"
@@ -1044,8 +1048,9 @@ def operate(
             )
         )
 
-        # Nao sobrescrever valores divergentes.
-        if current["value"] and not placeholder:
+        # Nao sobrescrever valores divergentes - EXCETO endereco de rua, que passa a
+        # usar o valor da planilha e seguir sem parar (decisao do operador).
+        if current["value"] and not placeholder and key not in RUA_KEYS:
             report["pending"].append(
                 "valor_preexistente_divergente:" + key
             )

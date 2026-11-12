@@ -175,43 +175,55 @@ def request_password_link(browser, config, cpf: str, email: str) -> StepResult:
     browser.reset_session()
     # TRTs: "Esqueci minha senha" fica na pagina do PJe, ao lado de "Entrar com PDPJ"; depois de
     # entrar no PDPJ ele nao existe mais. Entao procura ali ANTES de clicar no botao do PDPJ.
-    browser.open(config.base_url)
-    if not browser.visible("forgot_password_link", 5000):
-        if not open_login(browser, config):
-            return _fail(browser, "Tela de login do tribunal nao abriu")
-        if not browser.visible("forgot_password_link", 8000):
-            return _fail(browser, "Link 'Esqueceu a senha?' nao localizado")
-    browser.click("forgot_password_link")
-    # Primeiro espera o campo da janela de recuperacao; so depois aceita os genericos
-    # (pagina propria de recuperacao, onde o login nao esta na tela).
-    if browser.visible("reset_cpf_dialog", 8000):
-        cpf_group, email_group = "reset_cpf_dialog", "reset_email_dialog"
-    elif browser.visible("reset_cpf", 5000):
-        cpf_group, email_group = "reset_cpf", "reset_email"
-    else:
-        return _fail(browser, "Campo de CPF da recuperacao de senha nao localizado")
     cpf_digits = "".join(ch for ch in cpf if ch.isdigit())
-    browser.fill(cpf_group, cpf_digits)
-    if email and browser.visible(email_group, 1500):
-        browser.fill(email_group, email.strip())
-    # Garante que os dados foram para os campos certos antes de enviar (sem mostrar os valores).
-    try:
-        if "".join(ch for ch in browser.read(cpf_group) if ch.isdigit()) != cpf_digits:
-            return _fail(browser, "O CPF nao ficou no campo da recuperacao de senha")
-        if email and browser.visible(email_group, 500) and browser.read(email_group).strip().lower() != email.strip().lower():
-            return _fail(browser, "O e-mail nao ficou no campo da recuperacao de senha")
-    except Exception:  # noqa: BLE001
-        pass
-    browser.click("reset_submit")
-    deadline = time.monotonic() + 20
-    while time.monotonic() < deadline:
-        said = _dialog_text(browser) or " | ".join(_messages(browser))
-        if browser.visible("reset_confirmation", 500):
-            return StepResult(True, "Link de criacao de senha enviado ao e-mail cadastrado"
-                              + (f" (PJe: {said})" if said else ""))
-        if said and (_REJECTED.search(said) or _NEGATION.search(said)):
-            return StepResult(False, f"O PJe recusou o pedido de nova senha (PJe: {said})")
-    return _fail(browser, "O PJe nao confirmou o envio do link de senha")
+    ultimo_fail = "O PJe nao confirmou o envio do link de senha"
+    # O SOLICITAR as vezes nao confirma de primeira (PJe instavel): reabre e tenta de novo.
+    # Uma recusa de verdade (e-mail divergente, etc.) retorna na hora, sem repetir.
+    for tentativa in range(3):
+        if tentativa:
+            browser.reset_session()
+        browser.open(config.base_url)
+        if not browser.visible("forgot_password_link", 5000):
+            if not open_login(browser, config):
+                ultimo_fail = "Tela de login do tribunal nao abriu"
+                continue
+            if not browser.visible("forgot_password_link", 8000):
+                ultimo_fail = "Link 'Esqueceu a senha?' nao localizado"
+                continue
+        browser.click("forgot_password_link")
+        # Primeiro espera o campo da janela de recuperacao; so depois aceita os genericos
+        # (pagina propria de recuperacao, onde o login nao esta na tela).
+        if browser.visible("reset_cpf_dialog", 8000):
+            cpf_group, email_group = "reset_cpf_dialog", "reset_email_dialog"
+        elif browser.visible("reset_cpf", 5000):
+            cpf_group, email_group = "reset_cpf", "reset_email"
+        else:
+            ultimo_fail = "Campo de CPF da recuperacao de senha nao localizado"
+            continue
+        browser.fill(cpf_group, cpf_digits)
+        if email and browser.visible(email_group, 1500):
+            browser.fill(email_group, email.strip())
+        # Garante que os dados foram para os campos certos antes de enviar (sem mostrar os valores).
+        try:
+            if "".join(ch for ch in browser.read(cpf_group) if ch.isdigit()) != cpf_digits:
+                ultimo_fail = "O CPF nao ficou no campo da recuperacao de senha"
+                continue
+            if email and browser.visible(email_group, 500) and browser.read(email_group).strip().lower() != email.strip().lower():
+                ultimo_fail = "O e-mail nao ficou no campo da recuperacao de senha"
+                continue
+        except Exception:  # noqa: BLE001
+            pass
+        browser.click("reset_submit")
+        deadline = time.monotonic() + 20
+        while time.monotonic() < deadline:
+            said = _dialog_text(browser) or " | ".join(_messages(browser))
+            if browser.visible("reset_confirmation", 500):
+                return StepResult(True, "Link de criacao de senha enviado ao e-mail cadastrado"
+                                  + (f" (PJe: {said})" if said else ""))
+            if said and (_REJECTED.search(said) or _NEGATION.search(said)):
+                return StepResult(False, f"O PJe recusou o pedido de nova senha (PJe: {said})")
+        # nao confirmou nem recusou dentro do prazo: reabre e tenta de novo
+    return _fail(browser, ultimo_fail)
 
 
 def set_password(browser, config, link: str, password: str, fallback_password: str | None = None) -> StepResult:

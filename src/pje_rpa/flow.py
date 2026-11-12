@@ -325,7 +325,10 @@ class PJeRegistrationFlow:
         return f"Botao para {what} nao localizado. Homologue o seletor no .toml do tribunal"
 
     def _certificate_mismatch(self) -> str | None:
-        if _normalize_name(self.certificate.nome) != _normalize_name(self.record.nome_esperado):
+        # O CPF e a ancora de identidade (conferido abaixo). O nome do certificado as vezes vem
+        # sem um sobrenome (ex.: "ANA CAROLINA DE JESUS" vs "...DE JESUS ANDRADE"): aceita quando
+        # um nome e subsequencia, na ordem, do outro; ainda barra quando for pessoa diferente.
+        if not _names_compatible(self.certificate.nome, self.record.nome_esperado):
             return "Nome do certificado diferente do nome informado"
         if self.certificate.cpf != self.record.cpf_esperado:
             return "CPF do certificado diferente do CPF informado"
@@ -487,3 +490,22 @@ def _normalize_name(value: str) -> str:
     normalized = unicodedata.normalize("NFKD", value)
     ascii_text = "".join(ch for ch in normalized if not unicodedata.combining(ch))
     return " ".join(ascii_text.upper().split())
+
+
+def _names_compatible(a: str, b: str) -> bool:
+    """True quando os nomes sao a mesma pessoa, tolerando um sobrenome a menos no certificado.
+
+    Aceita se forem iguais ou se o nome mais curto for subsequencia (na ordem) do mais longo,
+    com pelo menos 2 nomes em comum. O CPF e conferido a parte e e a garantia real de identidade.
+    """
+    ta, tb = _normalize_name(a).split(), _normalize_name(b).split()
+    if not ta or not tb:
+        return False
+    if ta == tb:
+        return True
+    curto, longo = (ta, tb) if len(ta) <= len(tb) else (tb, ta)
+    i = 0
+    for token in longo:
+        if i < len(curto) and curto[i] == token:
+            i += 1
+    return i == len(curto) and len(curto) >= 2
