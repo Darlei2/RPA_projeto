@@ -284,33 +284,154 @@ def _campo_email_cadastro(page):
 
 JS_OBRIGATORIOS_VAZIOS = r"""() => {
   const vis = e => !!e.getClientRects().length;
+  const vazio = x => {
+    if (x.tagName === 'SELECT') {
+      const o = x.options[x.selectedIndex];
+      const t = ((o && o.text) || '').trim();
+      return !t || /^selecione/i.test(t) || /noSelection/i.test(x.value || '');
+    }
+    return !(x.value || '').trim();
+  };
   const out = [];
+  // rotulo repetido dentro da area de mensagens do PJe ("Telefone*: campo obrigatorio") nao e campo
+  const msg = '.rich-messages,.rich-message,.ui-messages-error,.alert-danger,.alert-error,[role=alert]';
   for (const rot of document.querySelectorAll('label,span,div,td,th')) {
-    if (!vis(rot) || rot.children.length > 1) continue;
+    if (!vis(rot) || rot.children.length > 1 || rot.closest(msg)) continue;
     const t = (rot.innerText || '').trim();
     if (t.length > 40 || !/\*\s*:?$/.test(t)) continue;
+    const nome = t.replace(/\s*\*\s*:?$/, '').trim();
+    if (!nome) continue;
     let box = rot.parentElement;
     for (let i = 0; i < 3 && box; i++, box = box.parentElement) {
       const campos = [...box.querySelectorAll(
         'input:not([type=hidden]):not([type=checkbox]):not([type=radio]),select,textarea')]
         .filter(x => vis(x) && (rot.compareDocumentPosition(x) & Node.DOCUMENT_POSITION_FOLLOWING));
       if (campos.length) {
-        if (!(campos[0].value || '').trim()) out.push(t.replace(/\s*\*\s*:?$/, ''));
+        if (vazio(campos[0])) out.push(nome);
         break;
       }
     }
   }
-  return [...new Set(out)].slice(0, 12);
+  return [...new Set(out)].slice(0, 25);
 }"""
 
+# Mensagens do PJe na tela do cadastro (sem o corte de 10 do leitor generico).
+JS_MENSAGENS_CADASTRO = r"""() => {
+  const vis = e => !!e.getClientRects().length && getComputedStyle(e).visibility !== 'hidden';
+  const sel = '.rich-messages,.rich-message,.ui-messages-error,.ui-message-error,.alert-danger,' +
+    '.alert-error,.erro,.error,.errors,.mensagem-erro,[role=alert],.invalid-feedback,.alert-warning';
+  const out = [];
+  for (const el of document.querySelectorAll(sel)) {
+    if (!vis(el)) continue;
+    const t = (el.innerText || '').trim().replace(/\s+/g, ' ');
+    if (t && t.length <= 300) out.push(t);
+  }
+  return [...new Set(out)].slice(0, 60);
+}"""
 
-def ajustar_email_cadastral(page, base_url: str, email_desejado: str) -> tuple[bool, str]:
+_LEGENDA_OBRIGATORIOS = re.compile(r"^\W*campos? obrigat[oó]rios?\W*$", re.I)
+_SO_CAMPO_OBRIGATORIO = re.compile(r"^\W*campo obrigat[oó]rio\W*$", re.I)
+_RECUSA_CADASTRO = re.compile(r"obrigat|inv[aá]lid|incorret|\berro\b|n[aã]o (?:foi )?poss[ií]vel|preench", re.I)
+
+
+def _mensagens_cadastro(page) -> list[str]:
+    try:
+        brutas = list(page.evaluate(JS_MENSAGENS_CADASTRO))
+    except Exception:  # noqa: BLE001
+        return []
+    return [m for m in (str(b or "").strip() for b in brutas) if m and not _LEGENDA_OBRIGATORIOS.match(m)]
+
+
+def _obrigatorios_vazios(page) -> list[str]:
+    try:
+        vazios = [str(v) for v in page.evaluate(JS_OBRIGATORIOS_VAZIOS)]
+    except Exception:  # noqa: BLE001
+        return []
+    return [v for v in vazios if not re.search(r"e-?mail", v, re.I)]
+
+
+def _clicar_atualizar(page) -> bool:
+    for loc in (page.get_by_role("button", name=re.compile(r"^\s*atualizar\s*$", re.I)),
+                page.locator("input[type=submit][value*='Atualizar' i]"),
+                page.get_by_text(re.compile(r"^\s*atualizar\s*$", re.I))):
+        try:
+            for i in range(min(loc.count(), 3)):
+                if loc.nth(i).is_visible():
+                    loc.nth(i).click(timeout=5000)
+                    return True
+        except Exception:  # noqa: BLE001
+            continue
+    return False
+
+
+_SOBRE_TELEFONE = re.compile(r"telefone|celular|\bddd\b", re.I)
+
+
+def _preencher_contato_vazio(page, record, so_obrigatorio: bool) -> list[str]:
+    """Telefone (e DDD, se o formulario separar) VAZIO no cadastro: preenche com o da planilha e
+    confere. Nunca sobrescreve o que o PJe ja tem e nao escolhe entre campos ambiguos.
+    Devolve as chaves preenchidas ("ddd", "phone"), nunca valores."""
+    from .adaptive_form import desired, field_key, numbers, other_subject, same, scan
+
+    try:
+        esperado = desired(record)
+        controles = scan(page)["controls"]
+    except Exception:  # noqa: BLE001
+        return []
+    por_chave: dict[str, list[tuple[int, dict]]] = {}
+    for controle in controles:
+        chave, peso = field_key(controle)
+        if chave in ("ddd", "phone") and not other_subject(chave, controle):
+            por_chave.setdefault(chave, []).append((peso, controle))
+
+    def unico(chave: str) -> dict | None:
+        itens = por_chave.get(chave) or []
+        if not itens:
+            return None
+        topo = max(peso for peso, _ in itens)
+        candidatos = [c for peso, c in itens if peso == topo]
+        if len(candidatos) > 1:  # "Telefone*" e "Celular": vale o obrigatorio, se for um so
+            candidatos = [c for c in candidatos if c.get("required")]
+        return candidatos[0] if len(candidatos) == 1 else None
+
+    ddd, fone = unico("ddd"), unico("phone")
+    if fone is None or str(fone.get("value") or "").strip():
+        return []
+    if "ddd" not in por_chave:
+        esperado["phone"] = numbers(getattr(record, "telefone", ""))  # campo unico: numero com DDD
+    elif ddd is None:
+        return []  # ha campo de DDD, mas nao da para saber qual: nao arrisca um telefone pela metade
+    elif str(ddd.get("value") or "").strip() and not same("ddd", ddd["value"], esperado["ddd"]):
+        return []  # DDD ja gravado e diferente do da planilha: o numero da planilha nao casa com ele
+    if so_obrigatorio and not fone.get("required"):
+        return []
+    feitos: list[str] = []
+    for chave, controle in (("ddd", ddd), ("phone", fone)):
+        if controle is None or not esperado.get(chave) or str(controle.get("value") or "").strip():
+            continue
+        if controle.get("tag") != "input" or controle.get("disabled") or controle.get("readonly"):
+            return feitos
+        alvo = page.locator("input,select,textarea").nth(controle["index"])
+        try:
+            alvo.fill(str(esperado[chave]), timeout=4000)
+            if same(chave, alvo.input_value(), esperado[chave]):
+                feitos.append(chave)
+        except Exception:  # noqa: BLE001
+            return feitos
+    return feitos
+
+
+def ajustar_email_cadastral(page, base_url: str, email_desejado: str, record=None) -> tuple[bool, str]:
     """Abre 'Alteracao de dados cadastrais' (ja logado com o A1) e, se o e-mail do PJe diferir do
     desejado (o da planilha, que controlamos), troca, clica ATUALIZAR e CONFERE reabrindo o
-    formulario. Usa a SESSAO ATUAL: nao reabre nem fecha o PJe. So mexe no campo de e-mail.
+    formulario. Usa a SESSAO ATUAL: nao reabre nem fecha o PJe.
+
+    Cadastro antigo sem telefone: o PJe recusa o ATUALIZAR enquanto o obrigatorio estiver vazio.
+    Com `record` (a linha da planilha), o robo preenche o telefone VAZIO com o da planilha junto
+    com o e-mail - nunca sobrescreve um telefone que o PJe ja tem.
 
     Devolve (True, "e-mail ja esta correto no PJe"), (True, "e-mail do PJe atualizado ...") ou
-    (False, motivo) - no motivo vao a mensagem do PJe e os campos obrigatorios vazios (so os nomes)."""
+    (False, motivo) - no motivo vao as mensagens do PJe e os campos obrigatorios vazios (so os nomes)."""
     alvo = (email_desejado or "").strip()
     if not alvo:
         return False, "sem e-mail desejado"
@@ -328,45 +449,56 @@ def ajustar_email_cadastral(page, base_url: str, email_desejado: str) -> tuple[b
     atual = (campo.input_value() or "").strip()
     if atual.lower() == alvo.lower():
         return True, "e-mail ja esta correto no PJe"
-    try:
-        vazios = list(page.evaluate(JS_OBRIGATORIOS_VAZIOS))
-    except Exception:  # noqa: BLE001
-        vazios = []
-    vazios = [v for v in vazios if not re.search(r"e-?mail", v, re.I)]
+    fixas = set(_mensagens_cadastro(page))  # avisos permanentes da tela: nao sao recusa
+    vazios = _obrigatorios_vazios(page)
     campo.fill(alvo)
-    clicou = False
-    for loc in (page.get_by_role("button", name=re.compile(r"^\s*atualizar\s*$", re.I)),
-                page.locator("input[type=submit][value*='Atualizar' i]"),
-                page.get_by_text(re.compile(r"^\s*atualizar\s*$", re.I))):
-        try:
-            for i in range(min(loc.count(), 3)):
-                if loc.nth(i).is_visible():
-                    loc.nth(i).click(timeout=5000)
-                    clicou = True
-                    break
-        except Exception:  # noqa: BLE001
-            continue
-        if clicou:
-            break
-    if not clicou:
+    contato = _preencher_contato_vazio(page, record, so_obrigatorio=True) if record is not None else []
+    if not _clicar_atualizar(page):
         return False, "botao ATUALIZAR nao localizado"
     page.wait_for_timeout(3000)
-    try:
-        from .adaptive_form import page_messages
-        mensagens = [m for m in page_messages(page) if m][:3]
-    except Exception:  # noqa: BLE001
-        mensagens = []
+    mensagens = [m for m in _mensagens_cadastro(page) if m not in fixas]
+    if record is not None and not contato and any(_SOBRE_TELEFONE.search(m) for m in mensagens):
+        # O PJe reclamou do telefone e o robo nao tinha reconhecido o campo como obrigatorio:
+        # o formulario recusado continua na tela; completa e salva de novo (uma vez so).
+        campo = _campo_email_cadastro(page)
+        if campo is not None:
+            try:
+                if (campo.input_value() or "").strip().lower() != alvo.lower():
+                    campo.fill(alvo)
+            except Exception:  # noqa: BLE001
+                pass
+            contato = _preencher_contato_vazio(page, record, so_obrigatorio=False)
+            if contato and _clicar_atualizar(page):
+                page.wait_for_timeout(3000)
+                mensagens = [m for m in _mensagens_cadastro(page) if m not in fixas]
     # Confere de verdade: reabre o formulario e le o e-mail gravado.
     campo = abrir()
     gravado = (campo.input_value() or "").strip() if campo is not None else ""
     if gravado.lower() == alvo.lower():
-        return True, "e-mail do PJe atualizado para o da planilha"
+        return True, ("e-mail do PJe atualizado para o da planilha"
+                      + ("; telefone que faltava no cadastro preenchido com o da planilha" if contato else ""))
     motivo = "o PJe nao salvou o e-mail novo"
-    if mensagens:
-        motivo += " (PJe: " + " | ".join(mensagens) + ")"
+    resumo = _resumo_mensagens(mensagens)
+    if resumo:
+        motivo += " (PJe: " + " | ".join(resumo) + ")"
     if vazios:
         motivo += "; campos obrigatorios vazios no cadastro: " + ", ".join(vazios)
     return False, motivo
+
+
+def _resumo_mensagens(mensagens: list[str]) -> list[str]:
+    """Mensagens do PJe para mostrar: sem o 'Campo obrigatorio' solto, sem repeticao e sem o bloco
+    que so junta as outras (o painel de mensagens repete o texto de cada item)."""
+    vistos: set[str] = set()
+    unicas: list[str] = []
+    for m in mensagens:
+        chave = m.casefold()
+        if _SO_CAMPO_OBRIGATORIO.match(m) or chave in vistos:
+            continue
+        vistos.add(chave)
+        unicas.append(m)
+    saida = [m for m in unicas if sum(1 for o in unicas if o != m and o in m) < 2]
+    return saida[:20]
 
 
 def set_password(browser, config, link: str, password: str, fallback_password: str | None = None) -> StepResult:

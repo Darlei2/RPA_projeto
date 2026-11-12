@@ -280,7 +280,8 @@ class PJeRegistrationFlow:
             return ""
         try:
             from .credencial import ajustar_email_cadastral
-            ok, detalhe = ajustar_email_cadastral(self.browser.page, self.config.base_url, self.record.email)
+            ok, detalhe = ajustar_email_cadastral(self.browser.page, self.config.base_url, self.record.email,
+                                                  record=self.record)
         except Exception as exc:  # noqa: BLE001 - cadastro ja concluido; nao pode quebrar o fluxo
             self.audit.record("email_cadastral_falhou", self.state.value, {"erro": type(exc).__name__})
             return f" | e-mail do PJe NAO conferido ({type(exc).__name__})"
@@ -290,8 +291,15 @@ class PJeRegistrationFlow:
             return ""
         if ok:
             self.audit.record("email_cadastral_atualizado", self.state.value, {"detalhe": detalhe})
-            return " | e-mail do PJe trocado pelo da planilha"
-        self.audit.record("email_cadastral_nao_alinhado", self.state.value, {"detalhe": detalhe})
+            return (" | e-mail do PJe trocado pelo da planilha"
+                    + (" (telefone que faltava no cadastro tambem preenchido)" if "telefone" in detalhe.casefold() else ""))
+        detalhes: dict = {"detalhe": detalhe}
+        try:
+            # estrutura do formulario (rotulos e ids; nunca valores) para ajustar o robo a esta tela
+            detalhes["page"] = self._scrub(self.browser.outline())
+        except Exception:  # noqa: BLE001
+            pass
+        self.audit.record("email_cadastral_nao_alinhado", self.state.value, detalhes)
         self._capture("email-cadastral")
         return " | e-mail do PJe NAO alinhado: " + detalhe
 
