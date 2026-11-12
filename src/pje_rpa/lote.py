@@ -573,8 +573,14 @@ def run_executar(audit_root: Path = Path("runtime/audit"), saida: Path = Path("e
     if so_senha:
         nova_senha = True
     elif not ensaio:
-        nova_senha = deps.yes("Se o advogado JA tiver cadastro em algum destes tribunais, criar uma NOVA senha "
-                              "mesmo assim?", False)
+        if deps.extras.get("senha_via_email"):
+            # Rota de credencial pelo e-mail: um advogado ja cadastrado sempre precisa de senha nova
+            # (e, se o e-mail no PJe divergir, o bot alinha pelo cadastro). Perguntar e redundante.
+            nova_senha = True
+            log("Advogados ja cadastrados tambem terao nova senha (e o e-mail no PJe sera alinhado se divergir).")
+        else:
+            nova_senha = deps.yes("Se o advogado JA tiver cadastro em algum destes tribunais, criar uma NOVA senha "
+                                  "mesmo assim?", False)
         log("Abra o PJeOffice PRO antes de continuar (ele assina o login e o termo).")
     nomes = ", ".join(c.tribunal for c in configs)
     acao = "ENSAIO" if ensaio else ("NOVA SENHA (sem cadastro)" if so_senha else "CADASTRO REAL")
