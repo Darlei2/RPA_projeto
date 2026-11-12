@@ -448,7 +448,21 @@ def test_via_email_pula_o_login_unico_e_nao_loga_no_gmail(pasta, monkeypatch):
                   rehearsal=False, nova_senha_se_ja_cadastrado=False)
     assert "senha_sso" not in kwargs_vistos          # login unico pulado
     assert fake.credenciais == ["52998224725"]        # foi pelo caminho do e-mail
-    # _abrir_caixa com senha_via_email zera email_senha/email_2fa: cai no setup manual, nunca no Gmail
-    from pje_rpa import senha_cli
+    # _abrir_caixa com senha_via_email nunca GERA senha de app. Sem IMAP: Gmail pelo navegador
+    # (rota reserva) quando ha senha + chave 2FA do e-mail; sem elas, cai no setup manual.
+    from pje_rpa import gmail_web, senha_cli
+
+    class CaixaWeb:
+        digitado, login_manual = [], False
+
+        def __init__(self, email, senha, chave, assist=None):
+            self.email = email
+
+        def check_login(self):
+            pass
+
+    monkeypatch.setattr(gmail_web, "GmailWebInbox", CaixaWeb)
     monkeypatch.setattr(senha_cli, "_setup_inbox", lambda email: "SEM_GMAIL")
-    assert lote._abrir_caixa("x@gmail.com", "", "", "", deps, "senha-email", "CHAVE2FA") == "SEM_GMAIL"
+    assert isinstance(lote._abrir_caixa("x@gmail.com", "", "", "", deps, "senha-email", "CHAVE2FA"), CaixaWeb)
+    assert lote._abrir_caixa("x@gmail.com", "", "", "", deps, "", "") == "SEM_GMAIL"
+    assert lote._abrir_caixa("x@outlook.com", "", "", "", deps, "senha-email", "CHAVE2FA") == "SEM_GMAIL"

@@ -129,25 +129,29 @@ def _dependencias_padrao() -> Dependencias:
 
 def _abrir_caixa(email: str, host: str, user: str, password: str, deps: Dependencias,
                  email_senha: str = "", email_2fa: str = ""):
-    """Caixa de e-mail do advogado por IMAP.
+    """Caixa de e-mail do advogado: IMAP sempre que houver senha IMAP; senao, Gmail pelo navegador.
 
     Senha da caixa, nesta ordem: coluna imap_senha; senha de app ja gerada (cofre local); senha
-    de app gerada agora pelo robo no Gmail com email_senha + email_2fa da planilha; senao pergunta.
+    de app gerada agora pelo robo no Gmail com email_senha + email_2fa da planilha. Sem nenhuma
+    delas (ou se a caixa recusar a senha IMAP), a rota reserva le o Gmail pelo navegador com
+    email_senha + email_2fa (gmail_web: sessao salva por conta); por ultimo, pergunta.
     """
     from . import cofre_local, senha_cli
     from .email_inbox import ImapInbox, guess_imap_host
 
     gerada = False
+    web_senha, web_2fa = email_senha, email_2fa  # para a rota reserva (Gmail pelo navegador)
     if deps.extras.get("senha_via_email"):
-        # Rota de e-mail com IMAP cadastrado a mao: usa so a imap_senha da planilha ou o cofre,
-        # nunca tenta logar no Gmail (o Google bloqueia navegador automatizado).
+        # Rota de e-mail com IMAP cadastrado a mao: usa a imap_senha da planilha ou o cofre e
+        # nao gera senha de app. Sem IMAP, cai direto na rota reserva pelo navegador.
         email_senha = email_2fa = ""
     if not password:
         password = cofre_local.ler(email)
     if not password and email_senha and email_2fa:
         password, gerada = _senha_de_app_gmail(email, email_senha, email_2fa, deps), True
     if not password:
-        return senha_cli._setup_inbox(email)
+        return _caixa_gmail_web(email, web_senha, web_2fa, deps,
+                                "sem senha IMAP para esta conta") or senha_cli._setup_inbox(email)
     inbox = ImapInbox(host=host or guess_imap_host(email) or "", user=user or email,
                       password=re.sub(r"\s", "", password))
     try:
@@ -163,7 +167,42 @@ def _abrir_caixa(email: str, host: str, user: str, password: str, deps: Dependen
             cofre_local.apagar(email)  # senha de app revogada: gera outra
             deps.log("  a senha de app guardada nao vale mais; gerando outra")
             return _abrir_caixa(email, host, user, "", deps, email_senha, email_2fa)
-        return senha_cli._setup_inbox(email)
+        return _caixa_gmail_web(email, web_senha, web_2fa, deps,
+                                "a caixa recusou a senha IMAP") or senha_cli._setup_inbox(email)
+
+
+@dataclass
+class CaixaPendente:
+    """Conta sem IMAP em que o Google exigiu verificacao no login pelo navegador: fica pendente."""
+    motivo: str
+
+
+def _caixa_gmail_web(email: str, senha: str, chave: str, deps: Dependencias, por_que: str):
+    """Rota reserva: Gmail pelo navegador. None = nao se aplica (nao e Gmail ou falta senha/chave 2FA
+    do e-mail). Se o Google barrar o login, registra a pendencia (na rota pelo e-mail) em vez de insistir."""
+    from .gmail_senha_app import GmailError, e_gmail
+    from .gmail_web import GmailWebInbox
+
+    if not (e_gmail(email) and senha and chave):
+        return None
+
+    def assist(motivo: str) -> str:
+        deps.log(f"\n  >>> Gmail: {motivo}.")
+        deps.log("      O robo NAO contorna isso. Abri um Edge normal com o perfil desta conta: faca o login nele")
+        deps.log("      (e-mail, senha e codigo do autenticador), espere a caixa abrir e FECHE essa janela.")
+        return deps.ask("  [Enter] fiz o login e fechei a janela | [P] desistir: ")
+
+    deps.log(f"Rota reserva ({por_que}): lendo o Gmail pelo navegador...")
+    caixa = GmailWebInbox(email, senha, chave, assist=assist if deps.extras.get("assistido") else None)
+    try:
+        caixa.check_login()
+    except GmailError as exc:
+        deps.log(f"FALHA no Gmail pelo navegador: {exc}")
+        return CaixaPendente(str(exc)) if deps.extras.get("senha_via_email") else None
+    como = ("login feito a mao" if caixa.login_manual else
+            "login automatico" if caixa.digitado else "sessao salva, sem novo login")
+    deps.log(f"OK: caixa de e-mail acessada pelo navegador ({como})")
+    return caixa
 
 
 def _senha_de_app_gmail(email: str, senha: str, chave: str, deps: Dependencias) -> str:
@@ -297,6 +336,13 @@ def _etapa_senha(config, linha, audit_root: Path, deps: Dependencias, res, cache
                                           linha.segredo("imap_usuario"), linha.segredo("imap_senha"), deps,
                                           linha.segredo("email_senha"), linha.segredo("email_2fa"))
     inbox = cache["inbox"]
+    if isinstance(inbox, CaixaPendente):
+        # Sem como ler o e-mail desta conta: nao pede senha nova ao PJe (o link chegaria e se perderia).
+        deps.log("PENDENTE: Gmail sem acesso (" + inbox.motivo + "). Pedido de senha NAO enviado ao PJe.")
+        res.credencial = LinhaCredencial(config.tribunal, config.base_url, record.nome_esperado,
+                                         record.cpf_esperado, record.email,
+                                         observacao="PENDENTE - Gmail: " + inbox.motivo)
+        return res
     lawyer = {"nome": record.nome_esperado, "cpf": record.cpf_esperado, "email": record.email,
               "chave_2fa_exibir": secret_2fa if deps.extras.get("chave_na_planilha", True) else ""}
     res.credencial = deps.credencial(config, audit_root, lawyer, inbox, secret_2fa)
@@ -388,6 +434,8 @@ def executar_lote(config: AppConfig, linhas: list, audit_root: Path, saida: Path
             except Exception as exc:  # noqa: BLE001 - um advogado com problema nao para o lote
                 from .senha_cli import safe_error
                 resultados.append(ResultadoAdvogado(linha.numero_linha, linha.nome, "ERROR", safe_error(exc)))
+            finally:
+                _fechar_caixa(deps, linha.numero_linha)
     except KeyboardInterrupt:
         deps.log("\nInterrompido pelo operador: os advogados ja processados vao para a planilha.")
         if not entregar:
@@ -399,6 +447,18 @@ def executar_lote(config: AppConfig, linhas: list, audit_root: Path, saida: Path
             deps.entregar(credenciais, saida)
     _resumo(resultados, config, rehearsal, deps.log)
     return resultados
+
+
+def _fechar_caixa(deps: Dependencias, numero_linha: int) -> None:
+    """Encerra a conexao IMAP do advogado que terminou (a caixa reabre sozinha se for usada de novo):
+    nao fica uma conexao aberta por conta durante o lote inteiro."""
+    caixa = deps.extras.get("cache", {}).get(numero_linha, {}).get("inbox")
+    fechar = getattr(caixa, "close", None)
+    if callable(fechar):
+        try:
+            fechar()
+        except Exception:  # noqa: BLE001
+            pass
 
 
 def executar_tribunais(configs: list[AppConfig], linhas: list, audit_root: Path, saida: Path,

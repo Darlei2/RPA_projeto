@@ -14,7 +14,7 @@ import html
 import imaplib
 import re
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from email.message import Message
 from typing import Callable, Protocol
@@ -129,23 +129,65 @@ def _conectar_imap(host: str) -> imaplib.IMAP4:
 
 @dataclass
 class ImapInbox:
-    """Caixa IMAP. Para Gmail: IMAP ativo e uma senha de app (conta com verificacao em 2 etapas)."""
+    """Caixa IMAP. Para Gmail: IMAP ativo e uma senha de app (conta com verificacao em 2 etapas).
+
+    Usa UMA conexao por caixa, reaproveitada entre as leituras: um login para conferir o acesso,
+    ler o que ja estava la e esperar o link (antes era um login novo a cada consulta, a cada 10 s -
+    muitos logins seguidos na mesma conta e o que mais parece ataque para o provedor). Se a conexao
+    cair, religa respeitando um intervalo minimo entre logins. Mensagens ja baixadas nao sao
+    baixadas de novo; ficam so em memoria ate close()."""
 
     host: str
     user: str
     password: str
     poll_s: int = 10
     connect: Callable[[str], imaplib.IMAP4] = _conectar_imap
+    reconnect_s: int = 30  # intervalo minimo entre dois logins na mesma caixa
+    logins: int = field(default=0, compare=False)  # quantos logins esta caixa ja fez (diagnostico)
+    _conn: object = field(default=None, repr=False, compare=False)
+    _ultimo_login: float = field(default=0.0, repr=False, compare=False)
+    _pastas: list[str] | None = field(default=None, repr=False, compare=False)
+    _lidas: dict = field(default_factory=dict, repr=False, compare=False)
 
-    def check_login(self) -> None:
+    def _conexao(self):
+        if self._conn is not None:
+            viva = getattr(self._conn, "noop", None)
+            try:
+                if viva is None or viva()[0] == "OK":
+                    return self._conn
+            except Exception:  # noqa: BLE001 - conexao caiu: religa abaixo
+                pass
+            self.close(esquecer=False)
+        espera = self.reconnect_s - (time.monotonic() - self._ultimo_login)
+        if self._ultimo_login and espera > 0:
+            time.sleep(espera)
         conn = self.connect(self.host)
+        self._ultimo_login = time.monotonic()
+        self.logins += 1
         try:
             conn.login(self.user, self.password)
-        finally:
+        except Exception:
             try:
                 conn.logout()
             except Exception:  # noqa: BLE001
                 pass
+            raise
+        self._conn = conn
+        return conn
+
+    def close(self, esquecer: bool = True) -> None:
+        """Encerra a conexao (e, por padrao, esquece as mensagens em memoria). Pode ser reaberta."""
+        conn, self._conn = self._conn, None
+        if esquecer:
+            self._lidas.clear()
+        if conn is not None:
+            try:
+                conn.logout()
+            except Exception:  # noqa: BLE001
+                pass
+
+    def check_login(self) -> None:
+        self._conexao()
 
     def known_links(self) -> frozenset[str]:
         """Links de senha que ja estao na caixa (ultimos 2 dias): o link novo tem de ser diferente."""
@@ -159,6 +201,7 @@ class ImapInbox:
             try:
                 mensagens = self._fetch(since)
             except Exception:  # noqa: BLE001 - falha passageira do IMAP: tenta de novo no proximo ciclo
+                self.close(esquecer=False)
                 mensagens = []
             link = find_link_in_messages(mensagens, since, exclude)
             if link:
@@ -172,6 +215,8 @@ class ImapInbox:
 
     def _folders(self, conn) -> list[str]:
         """Caixa de entrada + pasta de spam (o e-mail do PJe as vezes cai la)."""
+        if self._pastas is not None:
+            return self._pastas
         folders = ["INBOX"]
         try:
             _, listing = conn.list()
@@ -183,28 +228,35 @@ class ImapInbox:
                 match = re.search(r'"([^"]+)"\s*$', line) or re.search(r"(\S+)\s*$", line)
                 if match:
                     folders.append(match.group(1))
+        self._pastas = folders
         return folders
 
     def _fetch(self, since: datetime) -> list[Message]:
-        conn = self.connect(self.host)
-        try:
-            conn.login(self.user, self.password)
-            day = (since - timedelta(days=1)).strftime("%d-%b-%Y")
-            messages: list[Message] = []
-            for folder in self._folders(conn):
-                status, _ = conn.select(f'"{folder}"', readonly=True)
-                if status != "OK":
-                    continue
+        conn = self._conexao()
+        por_uid = hasattr(conn, "uid")  # UID nao muda quando outra mensagem e apagada: da para lembrar
+        day = (since - timedelta(days=1)).strftime("%d-%b-%Y")
+        messages: list[Message] = []
+        for folder in self._folders(conn):
+            status, _ = conn.select(f'"{folder}"', readonly=True)
+            if status != "OK":
+                continue
+            if por_uid:
+                _, data = conn.uid("SEARCH", None, "SINCE", day)
+            else:
                 _, data = conn.search(None, "SINCE", day)
-                ids = (data[0] or b"").split()[-30:]  # so as mais recentes
-                for msg_id in ids:
+            ids = (data[0] or b"").split()[-30:]  # so as mais recentes
+            for msg_id in ids:
+                chave = (folder, msg_id)
+                if por_uid and chave in self._lidas:
+                    messages.extend(self._lidas[chave])
+                    continue
+                if por_uid:
+                    _, fetched = conn.uid("FETCH", msg_id, "(BODY.PEEK[])")
+                else:
                     _, fetched = conn.fetch(msg_id, "(BODY.PEEK[])")
-                    for item in fetched or []:
-                        if isinstance(item, tuple) and len(item) > 1:
-                            messages.append(email.message_from_bytes(item[1]))
-            return messages
-        finally:
-            try:
-                conn.logout()
-            except Exception:  # noqa: BLE001
-                pass
+                novas = [email.message_from_bytes(item[1]) for item in fetched or []
+                         if isinstance(item, tuple) and len(item) > 1]
+                if por_uid:
+                    self._lidas[chave] = novas
+                messages.extend(novas)
+        return messages
