@@ -131,8 +131,8 @@ class PJeRegistrationFlow:
             self._transition(FlowState.ALREADY_REGISTERED, "existing_profile_detected")
             # Ja cadastrado e ainda logado com o A1: alinha o e-mail do PJe ao da planilha (para o
             # link de senha chegar na caixa que controlamos), na mesma sessao. Best-effort.
-            self._garantir_email_cadastral()
-            return self._result(RunStatus.ALREADY_REGISTERED, "Advogado ja cadastrado neste PJe")
+            nota = self._garantir_email_cadastral()
+            return self._result(RunStatus.ALREADY_REGISTERED, "Advogado ja cadastrado neste PJe" + nota)
 
         if not self.browser.visible("registration_form", 10000):
             # Execucao anterior ja enviou o formulario e parou no termo: retoma dali.
@@ -272,19 +272,28 @@ class PJeRegistrationFlow:
             reason += ". " + self._request_password_link()
         return self._result(RunStatus.COMPLETED, reason)
 
-    def _garantir_email_cadastral(self) -> None:
+    def _garantir_email_cadastral(self) -> str:
         """Ja cadastrado: confere o e-mail no 'Alteracao de dados cadastrais' e, se divergir do da
-        planilha, troca (na sessao ja aberta, sem reabrir o PJe). Qualquer falha so e registrada e o
-        fluxo segue - cai no comportamento de hoje (link de senha pode ir para o e-mail antigo)."""
+        planilha, troca e confere se gravou (na sessao ja aberta, sem reabrir o PJe). Qualquer falha
+        so e registrada e o fluxo segue. Devolve uma nota para o resultado (vazia se estava certo)."""
         if self.rehearsal or not getattr(self.record, "email", "") or not hasattr(self.browser, "page"):
-            return
+            return ""
         try:
             from .credencial import ajustar_email_cadastral
             ok, detalhe = ajustar_email_cadastral(self.browser.page, self.config.base_url, self.record.email)
-            self.audit.record("email_cadastral_ajustado" if ok else "email_cadastral_sem_ajuste",
-                              self.state.value, {"detalhe": detalhe})
         except Exception as exc:  # noqa: BLE001 - cadastro ja concluido; nao pode quebrar o fluxo
             self.audit.record("email_cadastral_falhou", self.state.value, {"erro": type(exc).__name__})
+            return f" | e-mail do PJe NAO conferido ({type(exc).__name__})"
+        detalhe = self._scrub(detalhe)
+        if ok and "ja esta correto" in detalhe:
+            self.audit.record("email_cadastral_ja_correto", self.state.value, {"detalhe": detalhe})
+            return ""
+        if ok:
+            self.audit.record("email_cadastral_atualizado", self.state.value, {"detalhe": detalhe})
+            return " | e-mail do PJe trocado pelo da planilha"
+        self.audit.record("email_cadastral_nao_alinhado", self.state.value, {"detalhe": detalhe})
+        self._capture("email-cadastral")
+        return " | e-mail do PJe NAO alinhado: " + detalhe
 
     def _request_password_link(self) -> str:
         """Sem senha cadastrada a credencial nao serve (so certificado/jus postulandi):

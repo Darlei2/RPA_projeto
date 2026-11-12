@@ -282,23 +282,57 @@ def _campo_email_cadastro(page):
     return None
 
 
+JS_OBRIGATORIOS_VAZIOS = r"""() => {
+  const vis = e => !!e.getClientRects().length;
+  const out = [];
+  for (const rot of document.querySelectorAll('label,span,div,td,th')) {
+    if (!vis(rot) || rot.children.length > 1) continue;
+    const t = (rot.innerText || '').trim();
+    if (t.length > 40 || !/\*\s*:?$/.test(t)) continue;
+    let box = rot.parentElement;
+    for (let i = 0; i < 3 && box; i++, box = box.parentElement) {
+      const campos = [...box.querySelectorAll(
+        'input:not([type=hidden]):not([type=checkbox]):not([type=radio]),select,textarea')]
+        .filter(x => vis(x) && (rot.compareDocumentPosition(x) & Node.DOCUMENT_POSITION_FOLLOWING));
+      if (campos.length) {
+        if (!(campos[0].value || '').trim()) out.push(t.replace(/\s*\*\s*:?$/, ''));
+        break;
+      }
+    }
+  }
+  return [...new Set(out)].slice(0, 12);
+}"""
+
+
 def ajustar_email_cadastral(page, base_url: str, email_desejado: str) -> tuple[bool, str]:
     """Abre 'Alteracao de dados cadastrais' (ja logado com o A1) e, se o e-mail do PJe diferir do
-    desejado (o da planilha, que controlamos), troca e clica ATUALIZAR. Usa a SESSAO ATUAL: nao
-    reabre nem fecha o PJe. So mexe no campo de e-mail; nao toca nos outros campos obrigatorios."""
+    desejado (o da planilha, que controlamos), troca, clica ATUALIZAR e CONFERE reabrindo o
+    formulario. Usa a SESSAO ATUAL: nao reabre nem fecha o PJe. So mexe no campo de e-mail.
+
+    Devolve (True, "e-mail ja esta correto no PJe"), (True, "e-mail do PJe atualizado ...") ou
+    (False, motivo) - no motivo vao a mensagem do PJe e os campos obrigatorios vazios (so os nomes)."""
     alvo = (email_desejado or "").strip()
     if not alvo:
         return False, "sem e-mail desejado"
     parsed = urlparse(base_url)
     url = f"{parsed.scheme}://{parsed.netloc}/pje/PessoaAdvogado/AlteracaoCadastro/listView.seam"
-    page.goto(url, wait_until="domcontentloaded", timeout=30000)
-    page.wait_for_timeout(2500)
-    campo = _campo_email_cadastro(page)
+
+    def abrir():
+        page.goto(url, wait_until="domcontentloaded", timeout=30000)
+        page.wait_for_timeout(2500)
+        return _campo_email_cadastro(page)
+
+    campo = abrir()
     if campo is None:
         return False, "campo de e-mail do cadastro nao localizado"
     atual = (campo.input_value() or "").strip()
     if atual.lower() == alvo.lower():
         return True, "e-mail ja esta correto no PJe"
+    try:
+        vazios = list(page.evaluate(JS_OBRIGATORIOS_VAZIOS))
+    except Exception:  # noqa: BLE001
+        vazios = []
+    vazios = [v for v in vazios if not re.search(r"e-?mail", v, re.I)]
     campo.fill(alvo)
     clicou = False
     for loc in (page.get_by_role("button", name=re.compile(r"^\s*atualizar\s*$", re.I)),
@@ -316,8 +350,23 @@ def ajustar_email_cadastral(page, base_url: str, email_desejado: str) -> tuple[b
             break
     if not clicou:
         return False, "botao ATUALIZAR nao localizado"
-    page.wait_for_timeout(2500)
-    return True, "e-mail do PJe atualizado para o da planilha"
+    page.wait_for_timeout(3000)
+    try:
+        from .adaptive_form import page_messages
+        mensagens = [m for m in page_messages(page) if m][:3]
+    except Exception:  # noqa: BLE001
+        mensagens = []
+    # Confere de verdade: reabre o formulario e le o e-mail gravado.
+    campo = abrir()
+    gravado = (campo.input_value() or "").strip() if campo is not None else ""
+    if gravado.lower() == alvo.lower():
+        return True, "e-mail do PJe atualizado para o da planilha"
+    motivo = "o PJe nao salvou o e-mail novo"
+    if mensagens:
+        motivo += " (PJe: " + " | ".join(mensagens) + ")"
+    if vazios:
+        motivo += "; campos obrigatorios vazios no cadastro: " + ", ".join(vazios)
+    return False, motivo
 
 
 def set_password(browser, config, link: str, password: str, fallback_password: str | None = None) -> StepResult:

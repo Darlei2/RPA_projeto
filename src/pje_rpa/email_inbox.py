@@ -156,7 +156,11 @@ class ImapInbox:
                                exclude: frozenset[str] = frozenset()) -> str | None:
         deadline = time.monotonic() + timeout_s
         while True:
-            link = find_link_in_messages(self._fetch(since), since, exclude)
+            try:
+                mensagens = self._fetch(since)
+            except Exception:  # noqa: BLE001 - falha passageira do IMAP: tenta de novo no proximo ciclo
+                mensagens = []
+            link = find_link_in_messages(mensagens, since, exclude)
             if link:
                 return link
             remaining = int(deadline - time.monotonic())
