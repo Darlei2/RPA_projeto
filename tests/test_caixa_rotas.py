@@ -1,11 +1,10 @@
-"""Rotas da caixa de e-mail: IMAP com um login so; Gmail pelo navegador quando nao ha senha IMAP."""
+"""Caixa de e-mail: IMAP com um login so; sem IMAP utilizavel a conta fica pendente (rota pelo e-mail)."""
 from datetime import datetime, timezone
 from email.message import EmailMessage
 from types import SimpleNamespace
 
-from pje_rpa import cofre_local, email_inbox, gmail_web, lote
+from pje_rpa import cofre_local, email_inbox, lote, senha_cli
 from pje_rpa.email_inbox import ImapInbox
-from pje_rpa.gmail_senha_app import GmailError
 
 LINK = "https://sso.cloud.pje.jus.br/auth/realms/pje/login-actions/action-token?key=abc"
 CHAVE = "JBSWY3DPEHPK3PXPJBSWY3DPEHPK3PXP"
@@ -86,21 +85,7 @@ def _deps(**extras):
     return SimpleNamespace(log=logs.append, extras=extras, secret=lambda p: "", ask=lambda p: ""), logs
 
 
-class CaixaWebFalsa:
-    criadas = []
-
-    def __init__(self, email, senha, chave, assist=None):
-        self.email, self.assist, self.digitado, self.login_manual = email, assist, [], False
-        CaixaWebFalsa.criadas.append(self)
-
-    def check_login(self):
-        if self.email.startswith("barrada"):
-            raise GmailError("o Google pediu uma verificacao que o robo nao faz (captcha, celular ou navegador)")
-
-
 def _preparar(monkeypatch, imap_ok=True):
-    CaixaWebFalsa.criadas = []
-
     class ImapFalso:
         def __init__(self, host, user, password):
             self.password = password
@@ -110,46 +95,55 @@ def _preparar(monkeypatch, imap_ok=True):
                 raise RuntimeError("AUTHENTICATIONFAILED")
 
     monkeypatch.setattr(email_inbox, "ImapInbox", ImapFalso)
-    monkeypatch.setattr(gmail_web, "GmailWebInbox", CaixaWebFalsa)
     monkeypatch.setattr(cofre_local, "ler", lambda email, *a, **k: "")
+    monkeypatch.setattr(senha_cli, "_setup_inbox", lambda email: "PERGUNTOU_AO_OPERADOR")
     return ImapFalso
 
 
-def test_com_senha_imap_usa_imap_e_nao_abre_o_navegador(monkeypatch):
+def test_com_senha_imap_usa_imap(monkeypatch):
     imap = _preparar(monkeypatch)
     deps, _ = _deps(senha_via_email=True)
     caixa = lote._abrir_caixa("fulana@gmail.com", "", "", "abcd efgh ijkl mnop", deps, "senha-email", CHAVE)
-    assert isinstance(caixa, imap) and caixa.password == "abcdefghijklmnop" and not CaixaWebFalsa.criadas
+    assert isinstance(caixa, imap) and caixa.password == "abcdefghijklmnop"
 
 
-def test_sem_senha_imap_cai_na_rota_do_navegador(monkeypatch):
+def test_sem_senha_imap_fica_pendente_na_rota_do_email(monkeypatch):
     _preparar(monkeypatch)
     deps, logs = _deps(senha_via_email=True)
+    # mesmo com a senha e a chave 2FA do e-mail na planilha: o robo nao entra no Gmail
     caixa = lote._abrir_caixa("fulana@gmail.com", "", "", "", deps, "senha-email", CHAVE)
-    assert isinstance(caixa, CaixaWebFalsa) and caixa.assist is None  # sem modo assistido: nao pausa
-    assert any("Rota reserva" in m for m in logs) and "senha-email" not in " ".join(logs)
+    assert isinstance(caixa, lote.CaixaPendente) and "sem senha IMAP" in caixa.motivo
+    assert "senha-email" not in " ".join(logs)
 
 
-def test_senha_imap_recusada_cai_na_rota_do_navegador(monkeypatch):
+def test_senha_imap_recusada_fica_pendente_na_rota_do_email(monkeypatch):
     _preparar(monkeypatch, imap_ok=False)
-    deps, _ = _deps(senha_via_email=True, assistido=True)
+    deps, logs = _deps(senha_via_email=True, assistido=True)
     caixa = lote._abrir_caixa("fulana@gmail.com", "", "", "abcdefghijklmnop", deps, "senha-email", CHAVE)
-    assert isinstance(caixa, CaixaWebFalsa) and caixa.assist is not None
+    assert isinstance(caixa, lote.CaixaPendente) and "recusou a senha IMAP" in caixa.motivo
+    assert any("FALHA na caixa de e-mail" in m for m in logs)
 
 
-def test_google_barra_a_conta_fica_pendente_e_o_pje_nao_recebe_pedido(monkeypatch):
+def test_fora_da_rota_do_email_o_operador_informa_a_caixa(monkeypatch):
+    _preparar(monkeypatch)
+    deps, _ = _deps()
+    assert lote._abrir_caixa("fulana@outlook.com", "", "", "", deps, "", "") == "PERGUNTOU_AO_OPERADOR"
+
+
+def test_conta_pendente_nao_gera_pedido_de_senha_no_pje(monkeypatch):
     _preparar(monkeypatch)
     deps, logs = _deps(senha_via_email=True)
-    caixa = lote._abrir_caixa("barrada@gmail.com", "", "", "", deps, "senha-email", CHAVE)
-    assert isinstance(caixa, lote.CaixaPendente) and "verificacao" in caixa.motivo
+    caixa = lote._abrir_caixa("semimap@gmail.com", "", "", "", deps, "", "")
+    assert isinstance(caixa, lote.CaixaPendente)
 
     chamadas = []
     deps.credencial = lambda *a: chamadas.append(a)
-    registro = SimpleNamespace(email="barrada@gmail.com", nome_esperado="Fulana", cpf_esperado="11122233344")
+    registro = SimpleNamespace(email="semimap@gmail.com", nome_esperado="Fulana", cpf_esperado="11122233344")
     linha = SimpleNamespace(record=registro, segredo=lambda c: "")
     config = SimpleNamespace(tribunal="TRE-MG - 1o grau", base_url="https://pje1g-mg.tse.jus.br/pje/login.seam")
     res = lote._etapa_senha(config, linha, None, deps, lote.ResultadoAdvogado(5, "Fulana"), {"inbox": caixa}, "")
-    assert not chamadas and not res.login_ok and res.credencial.observacao.startswith("PENDENTE - Gmail")
+    assert not chamadas and not res.login_ok and res.credencial.observacao.startswith("PENDENTE - e-mail")
+    assert any("Pedido de senha NAO enviado ao PJe" in m for m in logs)
 
 
 def test_fecha_a_conexao_imap_ao_terminar_o_advogado():

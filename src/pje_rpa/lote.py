@@ -130,28 +130,27 @@ def _dependencias_padrao() -> Dependencias:
 
 def _abrir_caixa(email: str, host: str, user: str, password: str, deps: Dependencias,
                  email_senha: str = "", email_2fa: str = ""):
-    """Caixa de e-mail do advogado: IMAP sempre que houver senha IMAP; senao, Gmail pelo navegador.
+    """Caixa de e-mail do advogado, sempre por IMAP.
 
-    Senha da caixa, nesta ordem: coluna imap_senha; senha de app ja gerada (cofre local); senha
-    de app gerada agora pelo robo no Gmail com email_senha + email_2fa da planilha. Sem nenhuma
-    delas (ou se a caixa recusar a senha IMAP), a rota reserva le o Gmail pelo navegador com
-    email_senha + email_2fa (gmail_web: sessao salva por conta); por ultimo, pergunta.
+    Senha da caixa, nesta ordem: coluna imap_senha; senha de app ja guardada (cofre local); fora
+    da rota pelo e-mail, senha de app gerada agora no Gmail com email_senha + email_2fa da planilha.
+    Sem senha que funcione: na rota pelo e-mail a conta fica pendente (o robo nao para para
+    perguntar); fora dela, o operador informa a caixa na hora.
     """
     from . import cofre_local, senha_cli
     from .email_inbox import ImapInbox, guess_imap_host
 
     gerada = False
-    web_senha, web_2fa = email_senha, email_2fa  # para a rota reserva (Gmail pelo navegador)
     if deps.extras.get("senha_via_email"):
         # Rota de e-mail com IMAP cadastrado a mao: usa a imap_senha da planilha ou o cofre e
-        # nao gera senha de app. Sem IMAP, cai direto na rota reserva pelo navegador.
+        # nao gera senha de app.
         email_senha = email_2fa = ""
     if not password:
         password = cofre_local.ler(email)
     if not password and email_senha and email_2fa:
         password, gerada = _senha_de_app_gmail(email, email_senha, email_2fa, deps), True
     if not password:
-        return _sem_imap(email, web_senha, web_2fa, deps, "sem senha IMAP para esta conta")
+        return _sem_imap(email, deps, "sem senha IMAP para esta conta")
     inbox = ImapInbox(host=host or guess_imap_host(email) or "", user=user or email,
                       password=re.sub(r"\s", "", password))
     try:
@@ -167,54 +166,23 @@ def _abrir_caixa(email: str, host: str, user: str, password: str, deps: Dependen
             cofre_local.apagar(email)  # senha de app revogada: gera outra
             deps.log("  a senha de app guardada nao vale mais; gerando outra")
             return _abrir_caixa(email, host, user, "", deps, email_senha, email_2fa)
-        return _sem_imap(email, web_senha, web_2fa, deps, "a caixa recusou a senha IMAP")
+        return _sem_imap(email, deps, "a caixa recusou a senha IMAP")
 
 
 @dataclass
 class CaixaPendente:
-    """Conta sem IMAP em que o Google exigiu verificacao no login pelo navegador: fica pendente."""
+    """Conta sem IMAP utilizavel na rota pelo e-mail: fica pendente e o PJe nao recebe o pedido."""
     motivo: str
 
 
-def _sem_imap(email: str, senha: str, chave: str, deps: Dependencias, por_que: str):
-    """Linha sem IMAP utilizavel: vai pelo Gmail no navegador, sem perguntar. Na rota pelo e-mail,
-    se nem isso for possivel a conta fica pendente (o robo nao para para pedir senha ao operador)."""
+def _sem_imap(email: str, deps: Dependencias, por_que: str):
+    """Sem IMAP utilizavel: na rota pelo e-mail a conta fica pendente (o robo nao para para pedir
+    senha ao operador); fora dela, o operador informa a caixa."""
     from . import senha_cli
 
-    caixa = _caixa_gmail_web(email, senha, chave, deps, por_que)
-    if caixa is not None:
-        return caixa
     if deps.extras.get("senha_via_email"):
-        return CaixaPendente(por_que + " e sem senha + chave 2FA do e-mail para a rota do navegador")
+        return CaixaPendente(por_que)
     return senha_cli._setup_inbox(email)
-
-
-def _caixa_gmail_web(email: str, senha: str, chave: str, deps: Dependencias, por_que: str):
-    """Rota reserva: Gmail pelo navegador. None = nao se aplica (nao e Gmail ou falta senha/chave 2FA
-    do e-mail). Se o Google barrar o login, registra a pendencia (na rota pelo e-mail) em vez de insistir."""
-    from .gmail_senha_app import GmailError, e_gmail
-    from .gmail_web import GmailWebInbox
-
-    if not (e_gmail(email) and senha and chave):
-        return None
-
-    def assist(motivo: str) -> str:
-        deps.log(f"\n  >>> Gmail: {motivo}.")
-        deps.log("      O robo NAO contorna isso. Abri um Edge normal com o perfil desta conta: faca o login nele")
-        deps.log("      (e-mail, senha e codigo do autenticador), espere a caixa abrir e FECHE essa janela.")
-        return deps.ask("  [Enter] fiz o login e fechei a janela | [P] desistir: ")
-
-    deps.log(f"Rota reserva ({por_que}): lendo o Gmail pelo navegador...")
-    caixa = GmailWebInbox(email, senha, chave, assist=assist if deps.extras.get("assistido") else None)
-    try:
-        caixa.check_login()
-    except GmailError as exc:
-        deps.log(f"FALHA no Gmail pelo navegador: {exc}")
-        return CaixaPendente(str(exc)) if deps.extras.get("senha_via_email") else None
-    como = ("login feito a mao" if caixa.login_manual else
-            "login automatico" if caixa.digitado else "sessao salva, sem novo login")
-    deps.log(f"OK: caixa de e-mail acessada pelo navegador ({como})")
-    return caixa
 
 
 def _senha_de_app_gmail(email: str, senha: str, chave: str, deps: Dependencias) -> str:
@@ -391,10 +359,10 @@ def _etapa_senha(config, linha, audit_root: Path, deps: Dependencias, res, cache
     inbox = cache["inbox"]
     if isinstance(inbox, CaixaPendente):
         # Sem como ler o e-mail desta conta: nao pede senha nova ao PJe (o link chegaria e se perderia).
-        deps.log("PENDENTE: Gmail sem acesso (" + inbox.motivo + "). Pedido de senha NAO enviado ao PJe.")
+        deps.log("PENDENTE: caixa de e-mail sem acesso (" + inbox.motivo + "). Pedido de senha NAO enviado ao PJe.")
         res.credencial = LinhaCredencial(config.tribunal, config.base_url, record.nome_esperado,
                                          record.cpf_esperado, record.email,
-                                         observacao="PENDENTE - Gmail: " + inbox.motivo)
+                                         observacao="PENDENTE - e-mail: " + inbox.motivo)
         return res
     lawyer = {"nome": record.nome_esperado, "cpf": record.cpf_esperado, "email": record.email,
               "chave_2fa_exibir": secret_2fa if deps.extras.get("chave_na_planilha", True) else ""}
