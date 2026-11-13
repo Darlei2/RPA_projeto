@@ -106,7 +106,7 @@ def _esperar_cdp(porta: int, prazo_s: float = 25) -> str:
 
 def _args_navegador(navegador: str, perfil: Path, porta: int, url: str, headless: bool) -> list[str]:
     args = [navegador, f"--remote-debugging-port={porta}", f"--user-data-dir={perfil.resolve()}",
-            "--no-first-run", "--no-default-browser-check", "--new-window"]
+            "--no-first-run", "--no-default-browser-check"]
     if headless:  # so em teste/servidor; na VM o login roda com janela visivel
         args += ["--headless=new", "--disable-gpu"]
         if sys.platform != "win32":
@@ -125,25 +125,50 @@ def abrir_chrome_cdp(pw, perfil: Path, navegador: str, headless: bool = False):
     try:
         url_cdp = _esperar_cdp(porta)
         browser = pw.chromium.connect_over_cdp(url_cdp)
+        # Logo apos conectar, o Chrome pode ainda nao ter exposto a aba que abriu; espera aparecer.
+        # (criar aba com new_page por CDP quebra: "Cannot read properties of undefined (reading '_page')")
+        contexto = None
+        fim = time.monotonic() + 15
+        while time.monotonic() < fim:
+            if browser.contexts:
+                contexto = browser.contexts[0]
+                if contexto.pages:
+                    break
+            time.sleep(0.3)
+        if contexto is None:
+            if not browser.contexts:
+                raise GmailError("o navegador abriu, mas o Playwright nao achou a sessao dele (tente de novo)")
+            contexto = browser.contexts[0]
     except BaseException:
         proc.terminate()
         raise
-    contexto = browser.contexts[0] if browser.contexts else browser.new_context()
     contexto._rpa_proc = proc  # encerrado no finally de _rodar
     contexto._rpa_browser = browser
     return contexto
 
 
 def _pagina_controlada(contexto):
-    """Uma aba para o robo dirigir. Prefere a ja aberta no Google; senao abre uma limpa."""
+    """A aba para o robo dirigir: a ja aberta no Google se houver; senao a primeira; senao uma nova
+    (so em contexto normal - no CDP a aba ja existe, pois abrir_chrome_cdp espera ela aparecer).
+    Fecha as abas em branco que sobrarem, para o Chrome ficar com uma aba so."""
     paginas = list(getattr(contexto, "pages", []) or [])
+    escolhida = None
     for pg in paginas:
         try:
             if "google.com" in (pg.url or ""):
-                return pg
+                escolhida = pg
+                break
         except Exception:  # noqa: BLE001
             continue
-    return paginas[0] if paginas else contexto.new_page()
+    if escolhida is None:
+        escolhida = paginas[0] if paginas else contexto.new_page()
+    for pg in paginas:  # fecha about:blank/nova-aba que tenha vindo junto
+        try:
+            if pg is not escolhida and (pg.url or "about:blank") in ("about:blank", "chrome://newtab/", ""):
+                pg.close()
+        except Exception:  # noqa: BLE001
+            continue
+    return escolhida
 
 
 def na_caixa(page) -> bool:
