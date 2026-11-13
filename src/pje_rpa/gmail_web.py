@@ -210,7 +210,7 @@ class GmailWebInbox:
     chave_2fa: str
     assist: Assist | None = None  # mostra o motivo; "" = ja fiz o login, qualquer texto = desistir
     perfil: Path | None = None
-    navegador: str = "edge"  # Edge por padrao (igual ao resto do robo); "chrome" ou caminho do .exe tambem valem
+    navegador: str = "chrome"  # Chrome por padrao; "edge" ou o caminho do .exe tambem valem
     headless: bool = False
     poll_s: int = 15
     abrir_contexto: Callable = abrir_chrome_cdp
@@ -413,7 +413,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--linha", type=int, help="uma linha (como no Excel)")
     parser.add_argument("--linhas", default="", help="varias linhas, ex.: 17,32")
     parser.add_argument("--planilha", default="planilhas/advogados.xlsx")
-    parser.add_argument("--navegador", default="edge", help="edge (padrao), chrome ou o caminho do .exe")
+    parser.add_argument("--navegador", default="chrome", help="chrome (padrao), edge ou o caminho do .exe")
     args = parser.parse_args(argv)
     pedidas = {int(n) for n in args.linhas.replace(";", ",").split(",") if n.strip().isdigit()}
     if args.linha:

@@ -2,7 +2,7 @@ param(
     [int]$Linha = 0,
     [string]$Linhas = "",
     [string]$Planilha = "planilhas\advogados.xlsx",
-    [string]$Navegador = "edge",
+    [string]$Navegador = "chrome",
     [string]$Python = ".venv\Scripts\python.exe"
 )
 
