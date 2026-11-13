@@ -331,6 +331,27 @@ class GmailWebInbox:
 
 
 # ---------------------------------------------------------------------- teste de uma conta
+def _todas_as_linhas(caminho: Path, senha_planilha: Callable[[], str]) -> list[tuple[int, dict[str, str]]]:
+    from .planilha import _ALIAS, _norm, _rows_xlsx
+
+    rows = _rows_xlsx(caminho, senha_planilha)
+    if not rows:
+        return []
+    cab = [_ALIAS.get(_norm(h), "") for h in rows[0]]
+    saida = []
+    for numero, row in enumerate(rows[1:], start=2):
+        dados = {col: (row[i] if i < len(row) else "").strip() for i, col in enumerate(cab) if col}
+        if dados.get("nome") or dados.get("email"):
+            saida.append((numero, dados))
+    return saida
+
+
+def _marcada(dados: dict) -> bool:
+    from .planilha import _norm
+
+    return _norm(dados.get("executar", "")) in {"s", "sim", "yes", "y", "1", "true"}
+
+
 def _linha_da_planilha(caminho: Path, numero: int, senha_planilha: Callable[[], str]) -> dict[str, str]:
     from .planilha import _ALIAS, _norm, _rows_xlsx
 
@@ -349,29 +370,16 @@ def _assist_console(motivo: str) -> str:
     return input("  [Enter] fiz o login e fechei a janela | [P] desistir: ")
 
 
-def main(argv: list[str] | None = None) -> int:
-    import getpass
-
-    parser = argparse.ArgumentParser(description="Testa a leitura do Gmail pelo navegador para UMA linha da planilha")
-    parser.add_argument("--linha", type=int, required=True, help="numero da linha na planilha (como no Excel)")
-    parser.add_argument("--planilha", default="planilhas/advogados.xlsx")
-    parser.add_argument("--navegador", default="edge", help="edge (padrao), chrome ou o caminho do .exe")
-    args = parser.parse_args(argv)
-    try:
-        dados = _linha_da_planilha(Path(args.planilha), args.linha,
-                                   lambda: getpass.getpass("Senha para abrir a planilha de advogados: "))
-    except Exception as exc:  # noqa: BLE001
-        print(f"FALHA ao ler a planilha: {exc}")
-        return 2
+def _testar_conta(numero: int, dados: dict, navegador: str) -> int:
+    nome = dados.get("nome") or "?"
     email = dados.get("email", "")
     faltam = [c for c in ("email", "email_senha", "email_2fa") if not dados.get(c)]
-    print(f"Gmail pelo navegador (teste, nao toca no PJe) - linha {args.linha}: {dados.get('nome', '?')}")
+    print(f"\n==================== Linha {numero}: {nome} ====================")
     if faltam:
-        print("FALHA: preencha na planilha a(s) coluna(s): " + ", ".join(faltam)
-              + "  (email_senha = senha do e-mail; email_2fa = chave de 32 caracteres do autenticador do Gmail)")
+        print("  PULADA: faltam na planilha: " + ", ".join(faltam)
+              + "  (email_senha = senha do e-mail; email_2fa = chave de 32 caracteres do autenticador)")
         return 2
-    caixa = GmailWebInbox(email, dados["email_senha"], dados["email_2fa"], assist=_assist_console,
-                          navegador=args.navegador)
+    caixa = GmailWebInbox(email, dados["email_senha"], dados["email_2fa"], assist=_assist_console, navegador=navegador)
 
     def como_entrou() -> str:
         if caixa.login_manual:
@@ -381,20 +389,60 @@ def main(argv: list[str] | None = None) -> int:
         return "sessao ja estava salva (nao digitou nada)"
 
     try:
-        print("1/3 Login no Gmail (o navegador vai abrir)...")
+        print("  1/3 Login no Gmail (o navegador vai abrir)...")
         caixa.check_login()
-        print("    OK: " + como_entrou())
-        print("2/3 Reabrindo para conferir se a sessao ficou salva...")
+        print("      OK: " + como_entrou())
+        print("  2/3 Reabrindo para conferir se a sessao ficou salva...")
         caixa.check_login()
-        print("    " + ("OK: " if not caixa.digitado and not caixa.login_manual else "ATENCAO: ") + como_entrou())
-        print("3/3 Procurando e-mails do PJe com link de senha (ultimos 2 dias)...")
+        print("      " + ("OK: " if not caixa.digitado and not caixa.login_manual else "ATENCAO: ") + como_entrou())
+        print("  3/3 Procurando e-mails do PJe com link de senha (ultimos 2 dias)...")
         links = caixa.known_links()
-        print(f"    OK: {len(links)} link(s) de senha do PJe encontrado(s) (os links nao sao mostrados)")
+        print(f"      OK: {len(links)} link(s) de senha do PJe encontrado(s) (os links nao sao mostrados)")
     except GmailError as exc:
-        print(f"FALHA: {exc}")
+        print(f"  FALHA: {exc}")
         return 3
-    print("\nResultado: a leitura do Gmail pelo navegador funcionou para esta conta.")
     return 0
+
+
+def main(argv: list[str] | None = None) -> int:
+    import getpass
+
+    parser = argparse.ArgumentParser(
+        description="Testa a leitura do Gmail pelo navegador (nao toca no PJe). "
+                    "Sem --linha/--linhas, testa todas as linhas marcadas com executar=S.")
+    parser.add_argument("--linha", type=int, help="uma linha (como no Excel)")
+    parser.add_argument("--linhas", default="", help="varias linhas, ex.: 17,32")
+    parser.add_argument("--planilha", default="planilhas/advogados.xlsx")
+    parser.add_argument("--navegador", default="edge", help="edge (padrao), chrome ou o caminho do .exe")
+    args = parser.parse_args(argv)
+    pedidas = {int(n) for n in args.linhas.replace(";", ",").split(",") if n.strip().isdigit()}
+    if args.linha:
+        pedidas.add(args.linha)
+    try:
+        linhas = _todas_as_linhas(Path(args.planilha),
+                                  lambda: getpass.getpass("Senha para abrir a planilha de advogados: "))
+    except Exception as exc:  # noqa: BLE001
+        print(f"FALHA ao ler a planilha: {exc}")
+        return 2
+    if pedidas:
+        alvo = [(n, d) for n, d in linhas if n in pedidas]
+        nao_achadas = pedidas - {n for n, _ in alvo}
+        if nao_achadas:
+            print("Linha(s) nao encontrada(s) na planilha: " + ", ".join(map(str, sorted(nao_achadas))))
+    else:
+        alvo = [(n, d) for n, d in linhas if _marcada(d)]
+    if not alvo:
+        print("Nenhuma linha para testar (passe --linha/--linhas ou marque executar=S).")
+        return 2
+    print(f"Gmail pelo navegador (teste, nao toca no PJe): {len(alvo)} conta(s) -> linhas "
+          + ", ".join(str(n) for n, _ in alvo))
+    piores = 0
+    for numero, dados in alvo:
+        piores = max(piores, _testar_conta(numero, dados, args.navegador))
+    print("\n================ RESUMO ================")
+    print("  Todas as contas testadas passaram." if piores == 0
+          else "  Alguma conta falhou ou foi pulada; veja acima.")
+    return piores
 
 
 if __name__ == "__main__":

@@ -153,9 +153,9 @@ def test_pasta_do_perfil_nao_revela_o_email(tmp_path):
 
 
 def test_teste_de_uma_conta_avisa_as_colunas_que_faltam(monkeypatch, capsys):
-    monkeypatch.setattr(gmail_web, "_linha_da_planilha",
-                        lambda caminho, numero, senha: {"nome": "Fulana", "email": "fulana@gmail.com"})
-    assert gmail_web.main(["--linha", "5"]) == 2
+    monkeypatch.setattr(gmail_web, "_todas_as_linhas",
+                        lambda caminho, senha: [(5, {"nome": "Fulana", "email": "fulana@gmail.com"})])
+    assert gmail_web.main(["--linha", "5"]) == 2  # 2 = alguma conta pulada/falhou
     saida = capsys.readouterr().out
     assert "email_senha" in saida and "email_2fa" in saida
 

@@ -1,6 +1,7 @@
 """Integracao real: o robo abre o Chrome (nao pelo Playwright), conecta por CDP, loga uma vez,
 salva a sessao e le o link. Usa Google/Gmail simulados; nao toca na internet."""
 import time
+from pathlib import Path
 from datetime import datetime, timezone
 
 import pytest
@@ -39,6 +40,8 @@ def chrome_real(tmp_path):
             chromium_bin = pw.chromium.executable_path
         except Exception as exc:  # noqa: BLE001
             pytest.skip(f"sem chromium: {exc}")
+    if not chromium_bin or not Path(chromium_bin).exists():
+        pytest.skip("Chromium do Playwright nao instalado (a VM usa Edge; este teste so roda onde ha Chromium)")
     estado = {"logins": 0, "sessao_valida": False, "api": [{"a": "PJe senha", "link": LINK}]}
 
     def contexto_roteado(pw, perfil, navegador, headless=False):
