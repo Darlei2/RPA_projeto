@@ -294,18 +294,20 @@ def test_varios_tribunais_em_sequencia_com_uma_entrega(pasta, monkeypatch):
     monkeypatch.chdir(PROJECT)
     planilha = _xlsx(pasta / "a.xlsx", [_linha(senha=""), _linha(nome="SEGUNDO ADVOGADO", cpf="01234567890")])
     fake = Fake(respostas=["tremg, tjpa, trt5", str(planilha)],
-                cadastro=["REHEARSAL_OK"] * 6)
+                cadastro=["REHEARSAL_OK"] * 8)
     perguntas = []
     deps = fake.deps()
     deps.secret = lambda p: perguntas.append(p) or "senha-a1"
     # ensaio explicito: na VM algum destes tribunais pode estar liberado para envio real
     assert run_executar(pasta / "audit", pasta / "out", ensaio=True, deps=deps) == 0
     # ordem: tribunal por tribunal, todos os advogados em cada um
-    assert [c[0] for c in fake.cadastros] == ["ADVOGADA DE TESTE", "SEGUNDO ADVOGADO"] * 3
+    # (trt5 traz o 2o grau junto: regra dos dois graus, ver graus.py)
+    assert [c[0] for c in fake.cadastros] == ["ADVOGADA DE TESTE", "SEGUNDO ADVOGADO"] * 4
     # a senha do certificado e pedida uma vez por advogado, nao por tribunal
     assert len([p for p in perguntas if "certificado" in p]) == 2
     texto = "\n".join(fake.log)
-    assert "TRIBUNAL 1/3: TRE-MG" in texto and "TRIBUNAL 3/3: TRT5" in texto and "RESUMO GERAL" in texto
+    assert "TRIBUNAL 1/4: TRE-MG" in texto and "TRIBUNAL 3/4: TRT5 - 1o grau" in texto
+    assert "TRIBUNAL 4/4: TRT5 - 2o grau" in texto and "RESUMO GERAL" in texto
     assert "cache" not in deps.extras  # segredos saem da memoria no fim
 
 
@@ -352,8 +354,9 @@ def test_so_senha_nao_entra_com_certificado(pasta, monkeypatch, tmp_path):
     trib = tmp_path / "tribunais"
     trib.mkdir()
     shutil.copy(PROJECT / "tribunais" / "_comum.toml", trib / "_comum.toml")
-    texto = (PROJECT / "tribunais" / "trt5.toml").read_text(encoding="utf-8")
-    (trib / "trt5.toml").write_text(texto.replace("selectors_approved = false", "selectors_approved = true")
+    # tribunal fora da regra dos dois graus (a regra tem testes proprios em test_graus.py)
+    texto = (PROJECT / "tribunais" / "tjpe.toml").read_text(encoding="utf-8")
+    (trib / "tjpe.toml").write_text(texto.replace("selectors_approved = false", "selectors_approved = true")
                                     .replace("allow_live_submission = false", "allow_live_submission = true"),
                                     encoding="utf-8")
     original = lote.listar_tribunais
@@ -363,7 +366,7 @@ def test_so_senha_nao_entra_com_certificado(pasta, monkeypatch, tmp_path):
     perguntas = []
     deps = fake.deps()
     deps.yes = lambda p, d=False: perguntas.append(p) or True
-    assert run_executar(pasta / "audit", pasta / "out", tribunal="trt5", deps=deps, so_senha=True) == 0
+    assert run_executar(pasta / "audit", pasta / "out", tribunal="tjpe", deps=deps, so_senha=True) == 0
     assert fake.cadastros == []  # nenhum login com certificado
     assert fake.credenciais == ["52998224725"] and fake.entregue
     assert not any("NOVA senha mesmo assim" in p for p in perguntas)  # implicito no so senha

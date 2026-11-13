@@ -171,6 +171,13 @@ cadastro com o A1 -> termo assinado -> "Solicitar nova senha" -> link do e-mail 
   cada vez, com todos os advogados em cada um; senhas do certificado, chave 2FA e caixa de e-mail sao
   pedidas uma vez por advogado; no fim ha uma unica planilha de entrega e um resumo geral.
   No modo real, tribunais sem envio liberado ficam de fora (o robo avisa e pede confirmacao).
+- **Regra dos dois graus (TRTs):** na Justica do Trabalho o 1o e o 2o grau sao sistemas separados
+  (`/primeirograu` e `/segundograu`): o cadastro e a senha sao feitos em cada um, e a credencial e uma so.
+  Por isso pedir `trt5` (ou `trt5-2g`) sempre roda `trt5` e depois `trt5-2g`, e o 2o grau recebe a mesma
+  senha do 1o. Se o 1o grau de um advogado ficar sem credencial pronta, o 2o grau dele nao e feito naquela
+  execucao (rode de novo: os dois sao refeitos com uma senha so). No modo real os DOIS graus precisam
+  estar liberados no `.toml`; com um so liberado, o tribunal inteiro fica de fora. A regra esta em
+  `src/pje_rpa/graus.py` (um padrao de endereco por familia de tribunais).
 
 - Tribunal sem envio real liberado no `.toml` roda so em ENSAIO.
 - Colunas obrigatorias: nome, cpf, oab_numero, oab_uf, email, telefone, cep, logradouro, numero,

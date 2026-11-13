@@ -270,7 +270,10 @@ def _one_tribunal(config, audit_root: Path, lawyer: dict, inbox, secret_2fa: str
         if not link:
             linha.observacao = "Link de senha nao recebido"
             return linha
-        step = set_password(browser, config, link, *_passwords())
+        # Outro grau do mesmo tribunal (graus.py): a senha tem de ser a que ja ficou no primeiro.
+        senhas = (lawyer["senha_preferida"], "") if lawyer.get("senha_preferida") else _passwords()
+        step = set_password(browser, config, link, *senhas)
+        senhas = ()
         link = ""
         if not step.ok and not step.expired and step.tried:
             # Alguns PJe (ex.: TRF5 Turmas Recursais) mostram erro mas gravam a senha: confere

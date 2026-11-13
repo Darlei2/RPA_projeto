@@ -1,0 +1,13 @@
+herda = "trt2.toml"
+
+# TRT2 - 2o grau (PJe-JT): mesmo endereco do 1o grau, em /segundograu.
+# Herda do 1o grau (trt2.toml), que tem os seletores mapeados do TRT2.
+# O cadastro e a senha sao feitos em cada grau e a credencial e uma so: o robo sempre faz os dois
+# graus juntos e repete no 2o a senha do 1o (ver src/pje_rpa/graus.py).
+# Confirme com scripts\sondar.ps1 -Tribunal trt2-2g
+# Libere o envio real (true/true) so depois de sondar + ensaio OK neste tribunal.
+[app]
+tribunal = "TRT2 - 2o grau"
+base_url = "https://pje.trt2.jus.br/segundograu/login.seam"
+selectors_approved = false
+allow_live_submission = false

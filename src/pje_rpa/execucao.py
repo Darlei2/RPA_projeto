@@ -64,6 +64,7 @@ def cadastrar(config: AppConfig, record: LawyerRecord, pfx: bytes | None, pfx_pa
               code_provider: Callable[[str], str | None], audit_root: Path, *,
               rehearsal: bool = False, notify: Notify = print, thumbprint: str = "",
               assist=None, senha_sso: bool = False, senha_sso_ja_cadastrado: bool = False,
+              senha_preferida: str = "",
               store=None, browser_factory=None, signer_factory=None) -> ResultadoCadastro:
     """Roda o cadastro com o A1. Nao pede senha do PJe: isso e feito depois (credencial).
 
@@ -134,7 +135,9 @@ def cadastrar(config: AppConfig, record: LawyerRecord, pfx: bytes | None, pfx_pa
             def tentar_senha() -> None:
                 nonlocal senha, senha_detalhe
                 try:
-                    step = set_password_via_sso(browser, config, *_passwords())
+                    # senha_preferida: outro grau do mesmo tribunal (graus.py) repete a senha do primeiro
+                    senhas = (senha_preferida, "") if senha_preferida else _passwords()
+                    step = set_password_via_sso(browser, config, *senhas)
                     senha, senha_detalhe = (step.value if step.ok else ""), step.detail
                 except Exception as exc:  # noqa: BLE001
                     senha_detalhe = f"falha na senha pelo login unico ({type(exc).__name__})"

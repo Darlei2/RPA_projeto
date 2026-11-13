@@ -31,6 +31,7 @@ class OpcaoTribunal:
     caminho: Path
     nome: str           # ex.: TJAP - 1o grau
     liberado: bool      # envio real liberado no .toml
+    url: str = ""       # endereco de login (define a regra dos dois graus, ver graus.py)
 
 
 def listar_tribunais(pasta: Path = PASTA_TRIBUNAIS) -> list[OpcaoTribunal]:
@@ -45,7 +46,7 @@ def listar_tribunais(pasta: Path = PASTA_TRIBUNAIS) -> list[OpcaoTribunal]:
         except Exception:  # noqa: BLE001 - arquivo quebrado nao derruba a lista
             continue
         opcoes.append(OpcaoTribunal(path.stem, path, cfg.tribunal,
-                                    cfg.selectors_approved and cfg.allow_live_submission))
+                                    cfg.selectors_approved and cfg.allow_live_submission, cfg.base_url))
     return opcoes
 
 
@@ -257,6 +258,45 @@ def _chave_2fa(linha, deps: Dependencias) -> str:
 
 def processar_advogado(config: AppConfig, linha, audit_root: Path, deps: Dependencias, *,
                        rehearsal: bool, nova_senha_se_ja_cadastrado: bool) -> ResultadoAdvogado:
+    """Um advogado num tribunal. Em tribunal com um cadastro por grau e uma credencial so
+    (graus.py), o segundo grau usa a senha do primeiro e nao e feito se o primeiro falhou."""
+    from . import graus
+
+    nome_grupo = graus.grupo(config.base_url)
+    if not nome_grupo or rehearsal:
+        return _processar_um(config, linha, audit_root, deps, rehearsal=rehearsal,
+                             nova_senha_se_ja_cadastrado=nova_senha_se_ja_cadastrado)
+    cache = deps.extras.setdefault("cache", {}).setdefault(linha.numero_linha, {})
+    feitos = cache.setdefault("graus", {})
+    anterior = feitos.get(nome_grupo)
+    if anterior is not None and not anterior["senha"]:
+        deps.log(f"\n========== Linha {linha.numero_linha}: {linha.nome} ({config.tribunal}) ==========")
+        motivo = (f"{anterior['tribunal']} ficou sem credencial pronta nesta execucao; os dois graus do "
+                  f"{nome_grupo} precisam da mesma senha. Rode de novo para refazer os dois.")
+        deps.log("PULADO: " + motivo)
+        return ResultadoAdvogado(linha.numero_linha, linha.nome, "PULADO", motivo)
+    cache["senha_preferida"] = anterior["senha"] if anterior else ""
+    try:
+        res = _processar_um(config, linha, audit_root, deps, rehearsal=rehearsal,
+                            nova_senha_se_ja_cadastrado=nova_senha_se_ja_cadastrado)
+    except Exception:
+        feitos.setdefault(nome_grupo, {"tribunal": config.tribunal, "senha": ""})
+        raise
+    finally:
+        cache.pop("senha_preferida", None)
+    senha = res.credencial.senha if res.login_ok else ""
+    if anterior is None:
+        feitos[nome_grupo] = {"tribunal": config.tribunal, "senha": senha}
+    elif senha and senha != anterior["senha"]:
+        aviso = f"senha DIFERENTE da do {anterior['tribunal']}: a credencial unica do {nome_grupo} nao vale"
+        res.credencial.observacao = (res.credencial.observacao + " | " if res.credencial.observacao else "") + aviso
+        res.motivo = (res.motivo + " | " if res.motivo else "") + aviso
+        deps.log("ATENCAO: " + aviso + ". Rode de novo para refazer os dois graus.")
+    return res
+
+
+def _processar_um(config: AppConfig, linha, audit_root: Path, deps: Dependencias, *,
+                  rehearsal: bool, nova_senha_se_ja_cadastrado: bool) -> ResultadoAdvogado:
     res = ResultadoAdvogado(linha.numero_linha, linha.nome)
     record = linha.record
     deps.log(f"\n========== Linha {linha.numero_linha}: {linha.nome} ({config.tribunal}) ==========")
@@ -293,6 +333,8 @@ def processar_advogado(config: AppConfig, linha, audit_root: Path, deps: Depende
         # Com extras["senha_via_email"], pula o login unico e vai direto pelo e-mail (IMAP da planilha).
         kwargs["senha_sso"] = True
         kwargs["senha_sso_ja_cadastrado"] = nova_senha_se_ja_cadastrado
+        if cache.get("senha_preferida"):
+            kwargs["senha_preferida"] = cache["senha_preferida"]  # outro grau do mesmo tribunal
     if deps.extras.get("assistido"):
         kwargs["assist"] = lambda report: _assistente(report, deps, rehearsal)
     if deps.store_factory:
@@ -356,6 +398,8 @@ def _etapa_senha(config, linha, audit_root: Path, deps: Dependencias, res, cache
         return res
     lawyer = {"nome": record.nome_esperado, "cpf": record.cpf_esperado, "email": record.email,
               "chave_2fa_exibir": secret_2fa if deps.extras.get("chave_na_planilha", True) else ""}
+    if cache.get("senha_preferida"):
+        lawyer["senha_preferida"] = cache["senha_preferida"]  # outro grau do mesmo tribunal: repete a senha
     res.credencial = deps.credencial(config, audit_root, lawyer, inbox, secret_2fa)
     secret_2fa = ""
     return res
@@ -584,6 +628,16 @@ def run_executar(audit_root: Path = Path("runtime/audit"), saida: Path = Path("e
         if invalidos:
             log("Nao reconhecido(s): " + ", ".join(invalidos) + ". Tente de novo.")
             escolhidos = []
+    from . import graus
+
+    escolhidos, incluidos, incompletos = graus.completar(escolhidos, opcoes)
+    for nome in incluidos:
+        log(f"Regra dos dois graus: incluido {nome} (cadastro e senha sao feitos nos dois graus).")
+    for nome_grupo in incompletos:
+        log(f"Regra dos dois graus: {nome_grupo} ficou de fora, falta o arquivo do outro grau em tribunais\\")
+    if not escolhidos:
+        log("Nenhum tribunal para executar.")
+        return 2
     log("\nTribunais, nesta ordem:")
     for i, o in enumerate(escolhidos, start=1):
         log(f"  {i}. {o.nome}  {'[envio real liberado]' if o.liberado else '[so ensaio]'}")
@@ -603,7 +657,12 @@ def run_executar(audit_root: Path = Path("runtime/audit"), saida: Path = Path("e
                 "Seguir so com os tribunais liberados (os outros ficam de fora)?", True):
             log("Cancelado. Rode em ensaio ou libere os tribunais.")
             return 2
-        escolhidos = [o for o in escolhidos if o.liberado]
+        escolhidos, fora = graus.so_grupos_inteiros([o for o in escolhidos if o.liberado])
+        for nome_grupo in fora:
+            log(f"Regra dos dois graus: {nome_grupo} ficou de fora, so um dos graus tem envio real liberado.")
+        if not escolhidos:
+            log("Cancelado. Libere os dois graus ou rode em ensaio.")
+            return 2
     configs = [load_config(o.caminho) for o in escolhidos]
     log("Modo: " + ("ENSAIO (nada e enviado nem assinado)" if ensaio else "REAL"))
     for c in configs:
