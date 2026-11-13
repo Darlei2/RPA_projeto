@@ -50,7 +50,7 @@ COLUNAS: dict[str, tuple[str, ...]] = {
     "email_2fa": ("email_2fa", "chave_2fa_email", "2fa_email", "codigo_email", "codigo_2fa_email", "chave_gmail"),
     "executar": ("executar", "processar", "ativo"),
 }
-OBRIGATORIAS = ("nome", "cpf", "oab_numero", "oab_uf", "email", "telefone", "cep",
+OBRIGATORIAS = ("nome", "cpf", "oab_numero", "oab_uf", "email", "cep",
                 "logradouro", "numero", "bairro", "cidade", "uf")
 # Coluna "certificado": vazia ou "windows" = A1 ja instalado no Windows, achado pelo CPF da linha;
 # 40 caracteres hexadecimais = thumbprint de um certificado instalado; outro texto = caminho do .pfx.
@@ -238,7 +238,8 @@ def gravar_modelo(destino: Path) -> Path:
     notas = wb.create_sheet("Instrucoes")
     for texto in (
         "Uma linha por advogado. A linha de exemplo esta com executar = N (sera ignorada).",
-        "Obrigatorias: nome, cpf, oab_numero, oab_uf, email, telefone, cep, logradouro, numero, bairro, cidade, uf.",
+        "Obrigatorias: nome, cpf, oab_numero, oab_uf, email, cep, logradouro, numero, bairro, cidade, uf.",
+        "telefone (DDD + numero): OPCIONAL. Se o formulario do tribunal exigir e a planilha nao tiver, o robo para nesse campo.",
         "rg_numero, rg_orgao (ex.: SSP/RJ, DETRAN/RJ), rg_data_expedicao (dd/mm/aaaa): OPCIONAIS, mas os TRTs exigem.",
         "estado_civil: solteiro(a), casado(a), divorciado(a), viuvo(a), separado(a) ou uniao estavel (os TRTs exigem).",
         "autorizacao_ref: OPCIONAL. Referencia do contrato/autorizacao do advogado; se preenchida, fica na auditoria.",

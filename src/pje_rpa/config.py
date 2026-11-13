@@ -151,7 +151,9 @@ def validate_lawyer(record: LawyerRecord) -> list[str]:
         errors.append("oab_uf invalida")
     if not re.fullmatch(r"[^@\s]+@[^@\s]+\.[^@\s]+", record.email):
         errors.append("email invalido")
-    if not 10 <= len(record.telefone) <= 11:
+    # Telefone opcional: quem decide se ele e obrigatorio e o formulario de cada tribunal. Sem ele, o
+    # robo mantem o que o PJe ja mostra e so para se o campo for obrigatorio e estiver vazio.
+    if record.telefone and not 10 <= len(record.telefone) <= 11:
         errors.append("telefone invalido")
     if len(record.endereco.cep) != 8:
         errors.append("CEP invalido")

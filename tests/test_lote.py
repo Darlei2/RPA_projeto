@@ -510,3 +510,23 @@ def test_leitura_da_planilha_pode_ser_trocada(pasta, monkeypatch):
     assert run_executar(pasta / "audit", pasta / "out", tribunal="tjap", planilha=str(planilha),
                         ensaio=True, deps=deps) == 0
     assert chamadas == [planilha] and fake.cadastros[0][1] == "veio-do-encaixe"
+
+
+# ------------------------------------------------------------ telefone opcional
+def test_telefone_e_opcional_mas_se_vier_tem_de_ser_valido(pasta):
+    sem = _linha()
+    sem[5] = ""                                   # coluna Celular vazia
+    ruim = _linha(nome="OUTRA PESSOA", cpf="01234567890")
+    ruim[5] = "12345"
+    linhas = ler_planilha(_xlsx(pasta / "a.xlsx", [sem, ruim]))
+    assert linhas[0].ok and linhas[0].record.telefone == "", linhas[0].erros
+    assert not linhas[1].ok and any("telefone invalido" in e for e in linhas[1].erros)
+
+
+def test_planilha_sem_a_coluna_de_telefone_e_aceita(pasta):
+    path = pasta / "a.csv"
+    colunas = [c for c in CABECALHO if c != "Celular"]
+    valores = [v for c, v in zip(CABECALHO, _linha()) if c != "Celular"]
+    path.write_text(";".join(colunas) + "\n" + ";".join(valores) + "\n", encoding="utf-8-sig")
+    linhas = ler_planilha(path)
+    assert linhas[0].ok and linhas[0].record.telefone == "", linhas[0].erros

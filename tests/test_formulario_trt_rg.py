@@ -192,3 +192,26 @@ def test_estado_civil_variacoes():
     assert civil_stem("Casado(a)") == civil_stem("casada")
     assert civil_stem("União estável") == civil_stem("uniao estavel")
     assert civil_stem("Casado(a)") != civil_stem("Solteiro(a)")
+
+
+# ---------------------------------------------------------------- telefone opcional
+SEM_TELEFONE = dataclasses.replace(COM_RG, telefone="")
+
+
+def test_sem_telefone_na_planilha_mantem_o_que_o_pje_ja_mostra(pagina):
+    page = pagina(_form(depois_de_enviar=True))
+    report = adaptive_form.operate(page, SEM_TELEFONE)
+    assert not report["blocked"] and report["pending"] == [], report
+    assert page.input_value("#cel") == "71999999999"  # o telefone do PJe nao e apagado nem trocado
+
+
+def test_sem_telefone_e_campo_obrigatorio_vazio_vira_pendencia(pagina):
+    html = _form(depois_de_enviar=True).replace(
+        '<td><input id=cel value="71999999999"></td>', '<td><input id=cel></td>' + AVISO)
+    page = pagina(html)
+    report = adaptive_form.operate(page, SEM_TELEFONE)
+    assert "campo_obrigatorio_sem_dado:phone" in report["pending"], report
+    # com telefone na planilha o mesmo formulario e preenchido e nao ha pendencia
+    page = pagina(html)
+    report = adaptive_form.operate(page, COM_RG)
+    assert report["pending"] == [] and page.input_value("#cel"), report
