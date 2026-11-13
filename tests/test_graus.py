@@ -377,3 +377,67 @@ def test_senha_existente_fora_da_regra_dos_dois_graus_so_confere(tmp_path):
     executar_tribunais([_cfg("trt5")], linhas, tmp_path / "audit", tmp_path / "out",
                        deps, rehearsal=True, nova_senha_se_ja_cadastrado=False)
     assert testes == []
+
+
+# ------------------------------------------------------ o que cada tribunal exige
+def test_trt_exige_telefone_e_os_outros_nao():
+    from types import SimpleNamespace
+
+    from pje_rpa import exigencias
+
+    sem, com = SimpleNamespace(telefone=""), SimpleNamespace(telefone="71999998888")
+    for url in ("https://pje.trt5.jus.br/primeirograu/login.seam", "https://pje.trt15.jus.br/segundograu/login.seam"):
+        assert exigencias.faltando(url, sem) == ["telefone (celular com DDD)"] and exigencias.faltando(url, com) == []
+    for url in ("https://pje1g-mg.tse.jus.br/pje/login.seam", "https://pje1g.trf1.jus.br/pje/login.seam",
+                "https://pje.tjap.jus.br/1g/login.seam", ""):
+        assert exigencias.faltando(url, sem) == []
+
+
+def _sem_telefone(tmp_path):
+    import dataclasses
+
+    linhas = ler_planilha(_planilha(tmp_path))
+    linhas[0].record = dataclasses.replace(linhas[0].record, telefone="")
+    return linhas
+
+
+def test_linha_sem_telefone_e_pulada_no_trt_antes_de_qualquer_acesso(tmp_path):
+    fake = Fake()
+    deps, testes = _com_senha_existente(fake)
+    consultas = []
+    deps.ja_feito = lambda config, linha: consultas.append(config.tribunal) or ""
+    por = executar_tribunais([_cfg("trt5"), _cfg("trt5-2g")], _sem_telefone(tmp_path), tmp_path / "audit",
+                             tmp_path / "out", deps, rehearsal=False, nova_senha_se_ja_cadastrado=True)
+    assert [r.cadastro for rs in por.values() for r in rs] == ["PULADO", "PULADO"]
+    assert "exige telefone (celular com DDD)" in por["TRT5 - 2o grau"][0].motivo
+    assert fake.cadastros == [] and fake.pedidos == [] and testes == [] and consultas == []
+    # no ensaio tambem: o formulario do TRT pediria o telefone do mesmo jeito
+    fake = Fake()
+    por = executar_tribunais([_cfg("trt5")], _sem_telefone(tmp_path), tmp_path / "audit", tmp_path / "out",
+                             fake.deps(), rehearsal=True, nova_senha_se_ja_cadastrado=False)
+    assert por["TRT5 - 1o grau"][0].cadastro == "PULADO" and fake.cadastros == []
+
+
+def test_linha_sem_telefone_segue_normal_fora_dos_trts(tmp_path):
+    fake = Fake()
+    por = executar_tribunais([_cfg("tjap")], _sem_telefone(tmp_path), tmp_path / "audit", tmp_path / "out",
+                             fake.deps(), rehearsal=False, nova_senha_se_ja_cadastrado=True)
+    assert por["TJAP - 1o grau"][0].cadastro == "COMPLETED" and len(fake.pedidos) == 1
+
+
+def test_assistente_avisa_antes_de_comecar_que_falta_o_telefone(tmp_path, monkeypatch):
+    from openpyxl import load_workbook
+
+    trib = _tribunais_de_teste(tmp_path, {"trt5", "trt5-2g", "tjap"})
+    original = lote.listar_tribunais
+    monkeypatch.setattr(lote, "listar_tribunais", lambda pasta=trib: original(trib))
+    planilha = _planilha(tmp_path)
+    wb = load_workbook(planilha)
+    wb.active.cell(row=2, column=CABECALHO.index("Celular") + 1, value="")
+    wb.save(planilha)
+    fake = Fake(respostas=[str(planilha)])
+    run_executar(tmp_path / "audit", tmp_path / "out", tribunal="trt5, tjap", ensaio=False, deps=fake.deps())
+    texto = "\n".join(fake.log)
+    assert "ATENCAO linha 2: sem telefone (celular com DDD), exigido em TRT5 - 1o grau" in texto
+    assert "exigido em TRT5 - 2o grau" in texto and "exigido em TJAP" not in texto
+    assert [t for t, _, _ in fake.pedidos] == ["TJAP - 1o grau"]   # so o TJAP e feito

@@ -252,7 +252,9 @@ def _chave_2fa(linha, deps: Dependencias) -> str:
 
 def processar_advogado(config: AppConfig, linha, audit_root: Path, deps: Dependencias, *,
                        rehearsal: bool, nova_senha_se_ja_cadastrado: bool) -> ResultadoAdvogado:
-    """Um advogado num tribunal. Tres regras antes do fluxo normal (nenhuma vale no ensaio):
+    """Um advogado num tribunal. Primeiro, o que o tribunal exige da planilha (exigencias.py): linha
+    sem o dado exigido e pulada antes de qualquer acesso, inclusive no ensaio. Depois, tres regras
+    antes do fluxo normal (nenhuma vale no ensaio):
 
     1. deps.ja_feito pode dizer que este advogado nao precisa ser refeito neste tribunal.
     2. Tribunal com um cadastro por grau e uma credencial so (graus.py): o segundo grau usa a
@@ -261,7 +263,7 @@ def processar_advogado(config: AppConfig, linha, audit_root: Path, deps: Depende
        sem certificado. Se entra, nada e alterado. Se nao entra, o tribunal so e completado
        (cadastro + a MESMA senha) quando essa senha ja foi confirmada no outro grau do mesmo
        tribunal; senao nada e alterado, porque trocar a senha quebraria a credencial que existe."""
-    from . import graus
+    from . import exigencias, graus
 
     def cabecalho() -> None:
         deps.log(f"\n========== Linha {linha.numero_linha}: {linha.nome} ({config.tribunal}) ==========")
@@ -271,6 +273,13 @@ def processar_advogado(config: AppConfig, linha, audit_root: Path, deps: Depende
                              nova_senha_se_ja_cadastrado=nova_senha_se_ja_cadastrado,
                              senha_do_outro_grau=senha_do_outro_grau, mostrar_cabecalho=mostrar_cabecalho)
 
+    falta = exigencias.faltando(config.base_url, linha.record)
+    if falta:
+        cabecalho()
+        motivo = (f"este tribunal exige {' e '.join(falta)} no cadastro e a planilha esta sem. "
+                  "Nada foi acessado: preencha e rode de novo.")
+        deps.log("PULADO: " + motivo)
+        return ResultadoAdvogado(linha.numero_linha, linha.nome, "PULADO", motivo)
     if rehearsal:
         return um()
     if deps.ja_feito:
@@ -774,7 +783,9 @@ def _confirmar(configs: list[AppConfig], validas: list, ensaio: bool, deps: Depe
                                   "mesmo assim?", False)
         log("Abra o PJeOffice PRO antes de continuar (ele assina o login e o termo).")
     nomes = ", ".join(c.tribunal for c in configs)
-    acao = "ENSAIO" if ensaio else ("NOVA SENHA (sem cadastro)" if opcoes.so_senha else "CADASTRO REAL")
+    acao = ("ENSAIO" if ensaio else "NOVA SENHA (sem cadastro)" if opcoes.so_senha
+            else "CONFERENCIA DA CREDENCIAL EXISTENTE (so completa o que falta)" if deps.senha_existente
+            else "CADASTRO REAL")
     if not deps.yes(f"Iniciar {acao} de {len(validas)} advogado(s) "
                     f"em {len(configs)} tribunal(is): {nomes}?", True):
         return None
@@ -817,6 +828,14 @@ def run_executar(audit_root: Path = Path("runtime/audit"), saida: Path = Path("e
     validas, codigo = _ler_advogados(planilha, deps)
     if codigo is not None:
         return codigo
+    from . import exigencias
+
+    for l in validas:
+        for c in configs:
+            falta = exigencias.faltando(c.base_url, l.record)
+            if falta:
+                log(f"  ATENCAO linha {l.numero_linha}: sem {' e '.join(falta)}, exigido em {c.tribunal}. "
+                    "A linha sera pulada nesse tribunal.")
     nova_senha = _confirmar(configs, validas, ensaio, deps)
     if nova_senha is None:
         log("Cancelado.")

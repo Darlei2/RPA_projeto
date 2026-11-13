@@ -184,9 +184,10 @@ cadastro com o A1 -> termo assinado -> "Solicitar nova senha" -> link do e-mail 
   confirmada no outro grau do mesmo tribunal. Senha que nao se confirma em nenhum grau nao altera nada.
 
 - Tribunal sem envio real liberado no `.toml` roda so em ENSAIO.
-- `telefone` e opcional: quem decide se ele e obrigatorio e o formulario de cada tribunal. Sem ele na
-  planilha, o robo mantem o telefone que o PJe ja mostra; se o campo for obrigatorio e estiver vazio,
-  para nesse campo (no modo assistido, o operador preenche na hora).
+- `telefone` e opcional, **menos nos TRTs**: a Justica do Trabalho exige telefone no cadastro, nos dois
+  graus, entao linha sem telefone e pulada nos TRTs antes de qualquer acesso (regra em
+  `src/pje_rpa/exigencias.py`). Nos demais tribunais, sem telefone na planilha o robo mantem o que o PJe
+  ja mostra; se o campo for obrigatorio e estiver vazio, para nesse campo.
 - Colunas obrigatorias: nome, cpf, oab_numero, oab_uf, email, cep, logradouro, numero,
   bairro, cidade, uf. `autorizacao_ref` e opcional (se preenchida, fica na auditoria).
 - Coluna `certificado`: **vazia** = usa o A1 ja instalado no Windows (Cert:\CurrentUser\My) com o

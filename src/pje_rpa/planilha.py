@@ -239,7 +239,7 @@ def gravar_modelo(destino: Path) -> Path:
     for texto in (
         "Uma linha por advogado. A linha de exemplo esta com executar = N (sera ignorada).",
         "Obrigatorias: nome, cpf, oab_numero, oab_uf, email, cep, logradouro, numero, bairro, cidade, uf.",
-        "telefone (DDD + numero): OPCIONAL. Se o formulario do tribunal exigir e a planilha nao tiver, o robo para nesse campo.",
+        "telefone (celular com DDD): OPCIONAL, mas os TRTs exigem (sem ele a linha e pulada nos TRTs).",
         "rg_numero, rg_orgao (ex.: SSP/RJ, DETRAN/RJ), rg_data_expedicao (dd/mm/aaaa): OPCIONAIS, mas os TRTs exigem.",
         "estado_civil: solteiro(a), casado(a), divorciado(a), viuvo(a), separado(a) ou uniao estavel (os TRTs exigem).",
         "autorizacao_ref: OPCIONAL. Referencia do contrato/autorizacao do advogado; se preenchida, fica na auditoria.",
