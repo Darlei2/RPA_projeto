@@ -178,6 +178,10 @@ cadastro com o A1 -> termo assinado -> "Solicitar nova senha" -> link do e-mail 
   execucao (rode de novo: os dois sao refeitos com uma senha so). No modo real os DOIS graus precisam
   estar liberados no `.toml`; com um so liberado, o tribunal inteiro fica de fora. A regra esta em
   `src/pje_rpa/graus.py` (um padrao de endereco por familia de tribunais).
+- **Advogado que ja tem credencial:** quem estende o robo pode informar a senha que ja existe
+  (`Dependencias.senha_existente`). O robo testa o login com ela, sem certificado: se entra, nada e
+  alterado; se nao entra, o grau so e completado (cadastro + a mesma senha) quando essa senha ja foi
+  confirmada no outro grau do mesmo tribunal. Senha que nao se confirma em nenhum grau nao altera nada.
 
 - Tribunal sem envio real liberado no `.toml` roda so em ENSAIO.
 - Colunas obrigatorias: nome, cpf, oab_numero, oab_uf, email, telefone, cep, logradouro, numero,

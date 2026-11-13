@@ -302,3 +302,78 @@ def test_passo_da_senha_usa_so_a_senha_preferida(tmp_path, monkeypatch):
     lawyer.pop("senha_preferida")
     senha_cli._one_tribunal(config, tmp_path / "audit", lawyer, FakeInbox(), "JBSWY3DPEHPK3PXP", pause=False)
     assert len(recebidas[0]) == 2 and all(recebidas[0]) and recebidas[0][0] != recebidas[0][1]
+
+
+# ------------------------------------------------- advogado que ja tem credencial
+def _com_senha_existente(fake, senha="senha-do-keymaker", entra_em=("TRT5 - 1o grau",)):
+    """Deps em que o advogado ja tem credencial com `senha`; o login com ela so entra em `entra_em`."""
+    deps = fake.deps()
+    testes = []
+
+    def testar(config, audit_root, lawyer, secret_2fa, tentada):
+        testes.append((config.tribunal, tentada))
+        linha = LinhaCredencial(config.tribunal, config.base_url, lawyer["nome"], lawyer["cpf"], lawyer["email"], senha=tentada)
+        linha.senha_cadastrada = True
+        linha.login_testado = config.tribunal in entra_em and tentada == senha
+        if not linha.login_testado:
+            linha.observacao = "Usuario nao cadastrado"
+        return linha
+
+    deps.testar_senha, deps.senha_existente = testar, lambda config, linha: senha
+    return deps, testes
+
+
+def test_credencial_existente_completa_so_o_grau_que_falta(tmp_path):
+    """O caso do TRT5: 1o grau ja funciona; o robo so cadastra o 2o grau, com a MESMA senha."""
+    linhas = ler_planilha(_planilha(tmp_path))
+    fake = Fake()
+    deps, testes = _com_senha_existente(fake)
+    por = executar_tribunais([_cfg("trt5"), _cfg("trt5-2g")], linhas, tmp_path / "audit", tmp_path / "out",
+                             deps, rehearsal=False, nova_senha_se_ja_cadastrado=True)
+    assert testes == [("TRT5 - 1o grau", "senha-do-keymaker"), ("TRT5 - 2o grau", "senha-do-keymaker")]
+    # 1o grau: nenhum login com certificado e nenhum pedido de senha; 2o grau: cadastro + a mesma senha
+    assert [t for t, _ in fake.cadastros] == ["TRT5 - 2o grau"]
+    assert fake.pedidos == [("TRT5 - 2o grau", "52998224725", "senha-do-keymaker")]
+    assert [r.cadastro for rs in por.values() for r in rs] == ["JA_TEM_ACESSO", "COMPLETED"]
+    assert [c.senha for c in fake.entregue] == ["senha-do-keymaker", "senha-do-keymaker"]
+    assert "senha-do-keymaker" not in "\n".join(fake.log)
+
+
+def test_credencial_existente_que_ja_entra_nos_dois_graus_nao_altera_nada(tmp_path):
+    linhas = ler_planilha(_planilha(tmp_path))
+    fake = Fake()
+    deps, testes = _com_senha_existente(fake, entra_em=("TRT5 - 1o grau", "TRT5 - 2o grau"))
+    por = executar_tribunais([_cfg("trt5"), _cfg("trt5-2g")], linhas, tmp_path / "audit", tmp_path / "out",
+                             deps, rehearsal=False, nova_senha_se_ja_cadastrado=True)
+    assert fake.cadastros == [] and fake.pedidos == [] and len(testes) == 2
+    assert [r.cadastro for rs in por.values() for r in rs] == ["JA_TEM_ACESSO", "JA_TEM_ACESSO"]
+
+
+def test_senha_existente_que_nao_entra_no_primeiro_grau_nao_altera_nada(tmp_path):
+    """Sem confirmar a senha em nenhum grau, o robo nao troca senha nem cadastra: nao quebra a credencial."""
+    linhas = ler_planilha(_planilha(tmp_path))
+    fake = Fake()
+    deps, testes = _com_senha_existente(fake, entra_em=())
+    por = executar_tribunais([_cfg("trt5"), _cfg("trt5-2g")], linhas, tmp_path / "audit", tmp_path / "out",
+                             deps, rehearsal=False, nova_senha_se_ja_cadastrado=True)
+    assert testes == [("TRT5 - 1o grau", "senha-do-keymaker")]          # o 2o grau nem e tentado
+    assert fake.cadastros == [] and fake.pedidos == [] and not fake.entregue
+    primeiro, segundo = por["TRT5 - 1o grau"][0], por["TRT5 - 2o grau"][0]
+    assert primeiro.cadastro == "SENHA_NAO_CONFERE" and "Nada foi alterado" in primeiro.motivo
+    assert primeiro.credencial is None and segundo.cadastro == "PULADO"
+
+
+def test_senha_existente_fora_da_regra_dos_dois_graus_so_confere(tmp_path):
+    linhas = ler_planilha(_planilha(tmp_path))
+    fake = Fake()
+    deps, testes = _com_senha_existente(fake, entra_em=())
+    por = executar_tribunais([_cfg("tjap")], linhas, tmp_path / "audit", tmp_path / "out",
+                             deps, rehearsal=False, nova_senha_se_ja_cadastrado=True)
+    assert fake.cadastros == [] and fake.pedidos == []
+    assert por["TJAP - 1o grau"][0].cadastro == "SENHA_NAO_CONFERE"
+    # e o ensaio nao consulta a senha existente
+    fake = Fake()
+    deps, testes = _com_senha_existente(fake)
+    executar_tribunais([_cfg("trt5")], linhas, tmp_path / "audit", tmp_path / "out",
+                       deps, rehearsal=True, nova_senha_se_ja_cadastrado=False)
+    assert testes == []

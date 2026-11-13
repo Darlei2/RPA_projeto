@@ -116,7 +116,9 @@ class Dependencias:
     Pontos de encaixe opcionais:
       ja_feito(config, linha) -> motivo: texto nao vazio = este advogado nao e refeito neste tribunal;
       ler_planilha(caminho, password_provider=...) -> linhas: leitura da planilha de advogados;
-      testar_senha(config, audit_root, lawyer, secret_2fa, senha) -> LinhaCredencial: teste do login.
+      testar_senha(config, audit_root, lawyer, secret_2fa, senha) -> LinhaCredencial: teste do login;
+      senha_existente(config, linha) -> senha: o advogado ja tem credencial neste tribunal. O robo so
+        confere o login com ela e nao altera o que funciona (ver processar_advogado).
     """
     ask: Callable[[str], str]
     secret: Callable[[str], str]
@@ -131,6 +133,7 @@ class Dependencias:
     ja_feito: Callable[..., str] | None = None
     ler_planilha: Callable[..., list] | None = None
     testar_senha: Callable[..., LinhaCredencial] | None = None
+    senha_existente: Callable[..., str] | None = None
     # Segredos pedidos uma vez por advogado (numero da linha -> dados), so em memoria: apagado no fim.
     cache: dict = field(default_factory=dict)
 
@@ -249,43 +252,69 @@ def _chave_2fa(linha, deps: Dependencias) -> str:
 
 def processar_advogado(config: AppConfig, linha, audit_root: Path, deps: Dependencias, *,
                        rehearsal: bool, nova_senha_se_ja_cadastrado: bool) -> ResultadoAdvogado:
-    """Um advogado num tribunal.
+    """Um advogado num tribunal. Tres regras antes do fluxo normal (nenhuma vale no ensaio):
 
-    Antes de qualquer login: deps.ja_feito pode dizer que este advogado nao precisa ser refeito.
-    Em tribunal com um cadastro por grau e uma credencial so (graus.py), o segundo grau usa a
-    senha do primeiro e nao e feito se o primeiro ficou sem credencial pronta."""
+    1. deps.ja_feito pode dizer que este advogado nao precisa ser refeito neste tribunal.
+    2. Tribunal com um cadastro por grau e uma credencial so (graus.py): o segundo grau usa a
+       senha do primeiro e nao e feito se o primeiro ficou sem credencial pronta.
+    3. deps.senha_existente (o advogado ja tem credencial): o robo testa o login com essa senha,
+       sem certificado. Se entra, nada e alterado. Se nao entra, o tribunal so e completado
+       (cadastro + a MESMA senha) quando essa senha ja foi confirmada no outro grau do mesmo
+       tribunal; senao nada e alterado, porque trocar a senha quebraria a credencial que existe."""
     from . import graus
 
     def cabecalho() -> None:
         deps.log(f"\n========== Linha {linha.numero_linha}: {linha.nome} ({config.tribunal}) ==========")
 
-    def um(senha_do_outro_grau: str = "") -> ResultadoAdvogado:
+    def um(senha_do_outro_grau: str = "", mostrar_cabecalho: bool = True) -> ResultadoAdvogado:
         return _processar_um(config, linha, audit_root, deps, rehearsal=rehearsal,
                              nova_senha_se_ja_cadastrado=nova_senha_se_ja_cadastrado,
-                             senha_do_outro_grau=senha_do_outro_grau)
+                             senha_do_outro_grau=senha_do_outro_grau, mostrar_cabecalho=mostrar_cabecalho)
 
-    if deps.ja_feito and not rehearsal:
+    if rehearsal:
+        return um()
+    if deps.ja_feito:
         motivo = deps.ja_feito(config, linha)
         if motivo:
             cabecalho()
             deps.log(motivo)
             return ResultadoAdvogado(linha.numero_linha, linha.nome, "JA_FEITO", motivo)
     nome_grupo = graus.grupo(config.base_url)
-    if not nome_grupo or rehearsal:
-        return um()
     feitos = deps.cache.setdefault(linha.numero_linha, {}).setdefault("graus", {})
-    anterior = feitos.get(nome_grupo)
+    anterior = feitos.get(nome_grupo) if nome_grupo else None
     if anterior is not None and not anterior["senha"]:
         cabecalho()
         motivo = (f"{anterior['tribunal']} ficou sem credencial pronta nesta execucao; os dois graus do "
                   f"{nome_grupo} precisam da mesma senha. Rode de novo para refazer os dois.")
         deps.log("PULADO: " + motivo)
         return ResultadoAdvogado(linha.numero_linha, linha.nome, "PULADO", motivo)
+
+    existente = (deps.senha_existente(config, linha) or "") if deps.senha_existente else ""
+    if existente:
+        cabecalho()
+        conferido = _conferir_acesso(config, linha, audit_root, deps, existente)
+        if conferido.login_ok:
+            if nome_grupo and anterior is None:
+                feitos[nome_grupo] = {"tribunal": config.tribunal, "senha": existente}
+            return conferido
+        if not (anterior and anterior["senha"] == existente):
+            conferido.cadastro = "SENHA_NAO_CONFERE"
+            conferido.motivo = ("a senha da credencial que ja existe nao entra neste tribunal (" + conferido.motivo
+                                + "). Nada foi alterado: trocar a senha aqui quebraria essa credencial.")
+            deps.log("NADA ALTERADO: " + conferido.motivo)
+            if nome_grupo:
+                feitos.setdefault(nome_grupo, {"tribunal": config.tribunal, "senha": ""})
+            return conferido
+        deps.log(f"  o login nao entrou aqui; a senha ja foi confirmada no {anterior['tribunal']}: "
+                 "este grau sera completado (cadastro + a mesma senha)")
     try:
-        res = um(anterior["senha"] if anterior else "")
+        res = um(anterior["senha"] if anterior else "", mostrar_cabecalho=not existente)
     except Exception:
-        feitos.setdefault(nome_grupo, {"tribunal": config.tribunal, "senha": ""})
+        if nome_grupo:
+            feitos.setdefault(nome_grupo, {"tribunal": config.tribunal, "senha": ""})
         raise
+    if not nome_grupo:
+        return res
     senha = res.credencial.senha if res.login_ok else ""
     if anterior is None:
         feitos[nome_grupo] = {"tribunal": config.tribunal, "senha": senha}
@@ -297,14 +326,39 @@ def processar_advogado(config: AppConfig, linha, audit_root: Path, deps: Depende
     return res
 
 
+def _conferir_acesso(config: AppConfig, linha, audit_root: Path, deps: Dependencias, senha: str) -> ResultadoAdvogado:
+    """Advogado que ja tem credencial: testa CPF + senha + 2FA, sem certificado e sem alterar nada.
+    Login OK: devolve o resultado com a credencial conferida. Login falho: resultado sem credencial
+    (a senha existente nao vai para a entrega)."""
+    record = linha.record
+    cache = deps.cache.setdefault(linha.numero_linha, {})
+    if "secret_2fa" not in cache:
+        cache["secret_2fa"] = _chave_2fa(linha, deps)
+    secret_2fa = cache["secret_2fa"]
+    deps.log("Credencial ja existente: conferindo o login com CPF + senha + 2FA (sem certificado)")
+    testar = deps.testar_senha
+    if testar is None:
+        from .senha_cli import testar_credencial as testar
+    lawyer = {"nome": record.nome_esperado, "cpf": record.cpf_esperado, "email": record.email,
+              "chave_2fa_exibir": secret_2fa if deps.opcoes.chave_na_planilha else ""}
+    credencial = testar(config, audit_root, lawyer, secret_2fa, senha)
+    if credencial.login_testado:
+        deps.log("OK: o login ja funciona neste tribunal. Nada foi alterado.")
+        return ResultadoAdvogado(linha.numero_linha, linha.nome, "JA_TEM_ACESSO",
+                                 "login conferido com a senha ja existente; nada foi alterado", credencial)
+    return ResultadoAdvogado(linha.numero_linha, linha.nome, "SEM_ACESSO",
+                             credencial.observacao or "o login nao entrou")
+
+
 def _processar_um(config: AppConfig, linha, audit_root: Path, deps: Dependencias, *,
                   rehearsal: bool, nova_senha_se_ja_cadastrado: bool,
-                  senha_do_outro_grau: str = "") -> ResultadoAdvogado:
+                  senha_do_outro_grau: str = "", mostrar_cabecalho: bool = True) -> ResultadoAdvogado:
     """Cadastro com o certificado e, se couber, senha + teste de login. senha_do_outro_grau: a senha
     que ja ficou no outro grau do mesmo tribunal (graus.py) e tem de ser repetida aqui."""
     res = ResultadoAdvogado(linha.numero_linha, linha.nome)
     record = linha.record
-    deps.log(f"\n========== Linha {linha.numero_linha}: {linha.nome} ({config.tribunal}) ==========")
+    if mostrar_cabecalho:
+        deps.log(f"\n========== Linha {linha.numero_linha}: {linha.nome} ({config.tribunal}) ==========")
 
     # Segredos pedidos uma vez por advogado e reaproveitados nos outros tribunais da execucao
     # (so em memoria; o cache e apagado no fim de run_executar).
