@@ -98,8 +98,26 @@ class ResultadoAdvogado:
 
 
 @dataclass
+class Opcoes:
+    """Como a execucao se comporta (o que o operador escolheu na linha de comando)."""
+    so_senha: bool = False          # advogado ja cadastrado: sem login com certificado, so senha + teste
+    senha_via_email: bool = False   # pula o login unico (PDPJ): a senha sai pelo "Esqueci minha senha"
+    sem_email: bool = False         # se o login unico nao der a senha, nao cai no e-mail (fica pendente)
+    assistido: bool | None = None   # duvida no formulario: pausar para o operador (None = perguntar no inicio)
+    perguntar_2fa: bool = True      # sem chave 2FA na planilha: perguntar ao operador
+    chave_na_planilha: bool = True  # a chave 2FA acompanha a credencial na entrega
+
+
+@dataclass
 class Dependencias:
-    """Pontos de troca para os testes (no uso real ficam os padroes)."""
+    """O que a execucao usa de fora. No uso real ficam os padroes; os testes e os fluxos que
+    estendem o robo trocam o que precisam aqui, sem substituir funcoes do modulo.
+
+    Pontos de encaixe opcionais:
+      ja_feito(config, linha) -> motivo: texto nao vazio = este advogado nao e refeito neste tribunal;
+      ler_planilha(caminho, password_provider=...) -> linhas: leitura da planilha de advogados;
+      testar_senha(config, audit_root, lawyer, secret_2fa, senha) -> LinhaCredencial: teste do login.
+    """
     ask: Callable[[str], str]
     secret: Callable[[str], str]
     yes: Callable[[str, bool], bool]
@@ -109,7 +127,12 @@ class Dependencias:
     entregar: Callable[[list[LinhaCredencial], Path], None]
     store_factory: Callable[[], object] | None = None
     log: Callable[[str], None] = print
-    extras: dict = field(default_factory=dict)
+    opcoes: Opcoes = field(default_factory=Opcoes)
+    ja_feito: Callable[..., str] | None = None
+    ler_planilha: Callable[..., list] | None = None
+    testar_senha: Callable[..., LinhaCredencial] | None = None
+    # Segredos pedidos uma vez por advogado (numero da linha -> dados), so em memoria: apagado no fim.
+    cache: dict = field(default_factory=dict)
 
 
 def _dependencias_padrao() -> Dependencias:
@@ -141,7 +164,7 @@ def _abrir_caixa(email: str, host: str, user: str, password: str, deps: Dependen
     from .email_inbox import ImapInbox, guess_imap_host
 
     gerada = False
-    if deps.extras.get("senha_via_email"):
+    if deps.opcoes.senha_via_email:
         # Rota de e-mail com IMAP cadastrado a mao: usa a imap_senha da planilha ou o cofre e
         # nao gera senha de app.
         email_senha = email_2fa = ""
@@ -180,7 +203,7 @@ def _sem_imap(email: str, deps: Dependencias, por_que: str):
     senha ao operador); fora dela, o operador informa a caixa."""
     from . import senha_cli
 
-    if deps.extras.get("senha_via_email"):
+    if deps.opcoes.senha_via_email:
         return CaixaPendente(por_que)
     return senha_cli._setup_inbox(email)
 
@@ -199,7 +222,7 @@ def _senha_de_app_gmail(email: str, senha: str, chave: str, deps: Dependencias) 
 
     deps.log("Gerando a senha de app do Gmail (so na primeira vez desta conta)...")
     try:
-        return gerar_senha_de_app(email, senha, chave, assist=assist if deps.extras.get("assistido") else None)
+        return gerar_senha_de_app(email, senha, chave, assist=assist if deps.opcoes.assistido else None)
     except GmailError as exc:
         deps.log(f"FALHA ao gerar a senha de app do Gmail: {exc}")
         return ""
@@ -221,37 +244,48 @@ def _chave_2fa(linha, deps: Dependencias) -> str:
             return normalizar_chave(_clean_2fa_key(raw))
         except ValueError:
             deps.log("  chave_2fa da planilha invalida; sera perguntada")
-    return _ask_2fa_key() if deps.extras.get("perguntar_2fa", True) else ""
+    return _ask_2fa_key() if deps.opcoes.perguntar_2fa else ""
 
 
 def processar_advogado(config: AppConfig, linha, audit_root: Path, deps: Dependencias, *,
                        rehearsal: bool, nova_senha_se_ja_cadastrado: bool) -> ResultadoAdvogado:
-    """Um advogado num tribunal. Em tribunal com um cadastro por grau e uma credencial so
-    (graus.py), o segundo grau usa a senha do primeiro e nao e feito se o primeiro falhou."""
+    """Um advogado num tribunal.
+
+    Antes de qualquer login: deps.ja_feito pode dizer que este advogado nao precisa ser refeito.
+    Em tribunal com um cadastro por grau e uma credencial so (graus.py), o segundo grau usa a
+    senha do primeiro e nao e feito se o primeiro ficou sem credencial pronta."""
     from . import graus
 
+    def cabecalho() -> None:
+        deps.log(f"\n========== Linha {linha.numero_linha}: {linha.nome} ({config.tribunal}) ==========")
+
+    def um(senha_do_outro_grau: str = "") -> ResultadoAdvogado:
+        return _processar_um(config, linha, audit_root, deps, rehearsal=rehearsal,
+                             nova_senha_se_ja_cadastrado=nova_senha_se_ja_cadastrado,
+                             senha_do_outro_grau=senha_do_outro_grau)
+
+    if deps.ja_feito and not rehearsal:
+        motivo = deps.ja_feito(config, linha)
+        if motivo:
+            cabecalho()
+            deps.log(motivo)
+            return ResultadoAdvogado(linha.numero_linha, linha.nome, "JA_FEITO", motivo)
     nome_grupo = graus.grupo(config.base_url)
     if not nome_grupo or rehearsal:
-        return _processar_um(config, linha, audit_root, deps, rehearsal=rehearsal,
-                             nova_senha_se_ja_cadastrado=nova_senha_se_ja_cadastrado)
-    cache = deps.extras.setdefault("cache", {}).setdefault(linha.numero_linha, {})
-    feitos = cache.setdefault("graus", {})
+        return um()
+    feitos = deps.cache.setdefault(linha.numero_linha, {}).setdefault("graus", {})
     anterior = feitos.get(nome_grupo)
     if anterior is not None and not anterior["senha"]:
-        deps.log(f"\n========== Linha {linha.numero_linha}: {linha.nome} ({config.tribunal}) ==========")
+        cabecalho()
         motivo = (f"{anterior['tribunal']} ficou sem credencial pronta nesta execucao; os dois graus do "
                   f"{nome_grupo} precisam da mesma senha. Rode de novo para refazer os dois.")
         deps.log("PULADO: " + motivo)
         return ResultadoAdvogado(linha.numero_linha, linha.nome, "PULADO", motivo)
-    cache["senha_preferida"] = anterior["senha"] if anterior else ""
     try:
-        res = _processar_um(config, linha, audit_root, deps, rehearsal=rehearsal,
-                            nova_senha_se_ja_cadastrado=nova_senha_se_ja_cadastrado)
+        res = um(anterior["senha"] if anterior else "")
     except Exception:
         feitos.setdefault(nome_grupo, {"tribunal": config.tribunal, "senha": ""})
         raise
-    finally:
-        cache.pop("senha_preferida", None)
     senha = res.credencial.senha if res.login_ok else ""
     if anterior is None:
         feitos[nome_grupo] = {"tribunal": config.tribunal, "senha": senha}
@@ -264,15 +298,18 @@ def processar_advogado(config: AppConfig, linha, audit_root: Path, deps: Depende
 
 
 def _processar_um(config: AppConfig, linha, audit_root: Path, deps: Dependencias, *,
-                  rehearsal: bool, nova_senha_se_ja_cadastrado: bool) -> ResultadoAdvogado:
+                  rehearsal: bool, nova_senha_se_ja_cadastrado: bool,
+                  senha_do_outro_grau: str = "") -> ResultadoAdvogado:
+    """Cadastro com o certificado e, se couber, senha + teste de login. senha_do_outro_grau: a senha
+    que ja ficou no outro grau do mesmo tribunal (graus.py) e tem de ser repetida aqui."""
     res = ResultadoAdvogado(linha.numero_linha, linha.nome)
     record = linha.record
     deps.log(f"\n========== Linha {linha.numero_linha}: {linha.nome} ({config.tribunal}) ==========")
 
     # Segredos pedidos uma vez por advogado e reaproveitados nos outros tribunais da execucao
     # (so em memoria; o cache e apagado no fim de run_executar).
-    cache = deps.extras.setdefault("cache", {}).setdefault(linha.numero_linha, {})
-    if linha.usa_windows or deps.extras.get("so_senha"):
+    cache = deps.cache.setdefault(linha.numero_linha, {})
+    if linha.usa_windows or deps.opcoes.so_senha:
         pfx, pfx_password = None, ""  # certificado ja instalado (ou nao usado): sem arquivo e sem senha
     else:
         pfx = linha.certificado.read_bytes()
@@ -287,23 +324,23 @@ def _processar_um(config: AppConfig, linha, audit_root: Path, deps: Dependencias
         cache["secret_2fa"] = _chave_2fa(linha, deps)
     secret_2fa = cache["secret_2fa"]
 
-    if deps.extras.get("so_senha"):
+    if deps.opcoes.so_senha:
         res.cadastro, res.motivo = "NAO_TENTADO", "opcao so senha: cadastro nao conferido"
         deps.log("1/2 Cadastro: pulado (opcao so senha, sem login com certificado)")
-        return _etapa_senha(config, linha, audit_root, deps, res, cache, secret_2fa)
+        return _etapa_senha(config, linha, audit_root, deps, res, cache, secret_2fa, senha_do_outro_grau)
 
     # 1) Cadastro com o certificado
     deps.log("1/2 Cadastro com o certificado A1" + (" (instalado no Windows)" if linha.usa_windows else " (.pfx)"))
     kwargs = {"rehearsal": rehearsal, "notify": deps.log, "thumbprint": linha.thumbprint}
-    if not rehearsal and not deps.extras.get("senha_via_email"):
+    if not rehearsal and not deps.opcoes.senha_via_email:
         # Senha pelo login unico (PDPJ), sem e-mail, na mesma sessao do certificado; se o tribunal
         # nao oferecer, o robo cai no caminho do e-mail ("Esqueci minha senha").
-        # Com extras["senha_via_email"], pula o login unico e vai direto pelo e-mail (IMAP da planilha).
+        # Com a opcao senha_via_email, pula o login unico e vai direto pelo e-mail (IMAP da planilha).
         kwargs["senha_sso"] = True
         kwargs["senha_sso_ja_cadastrado"] = nova_senha_se_ja_cadastrado
-        if cache.get("senha_preferida"):
-            kwargs["senha_preferida"] = cache["senha_preferida"]  # outro grau do mesmo tribunal
-    if deps.extras.get("assistido"):
+        if senha_do_outro_grau:
+            kwargs["senha_preferida"] = senha_do_outro_grau
+    if deps.opcoes.assistido:
         kwargs["assist"] = lambda report: _assistente(report, deps, rehearsal)
     if deps.store_factory:
         kwargs["store"] = deps.store_factory()
@@ -324,17 +361,17 @@ def _processar_um(config: AppConfig, linha, audit_root: Path, deps: Dependencias
     senha_sso = getattr(resultado, "senha", "")
     if senha_sso:
         deps.log("2/2 Credencial: senha criada pelo login unico (sem e-mail); teste de CPF + senha + 2FA")
-        testar = deps.extras.get("testar_senha")
+        testar = deps.testar_senha
         if testar is None:
             from .senha_cli import testar_credencial as testar
         lawyer = {"nome": record.nome_esperado, "cpf": record.cpf_esperado, "email": record.email,
-                  "chave_2fa_exibir": secret_2fa if deps.extras.get("chave_na_planilha", True) else ""}
+                  "chave_2fa_exibir": secret_2fa if deps.opcoes.chave_na_planilha else ""}
         res.credencial = testar(config, audit_root, lawyer, secret_2fa, senha_sso)
         senha_sso = ""
         if res.credencial.login_testado:
             return res
         deps.log("  a senha do login unico nao passou no teste de login")
-    if deps.extras.get("sem_email"):
+    if deps.opcoes.sem_email:
         # Execucao sem intervencao: nao cai no "Esqueci minha senha" (depende da caixa de e-mail).
         detalhe = getattr(resultado, "senha_detalhe", "") or "login unico indisponivel"
         if res.credencial is not None and not res.credencial.login_testado:
@@ -345,11 +382,13 @@ def _processar_um(config: AppConfig, linha, audit_root: Path, deps: Dependencias
         deps.log(f"2/2 Credencial: senha pendente ({detalhe}). E-mail desligado nesta execucao.")
         return res
     deps.log("  tentando pelo e-mail")
-    return _etapa_senha(config, linha, audit_root, deps, res, cache, secret_2fa)
+    return _etapa_senha(config, linha, audit_root, deps, res, cache, secret_2fa, senha_do_outro_grau)
 
 
-def _etapa_senha(config, linha, audit_root: Path, deps: Dependencias, res, cache: dict, secret_2fa: str):
-    """2) Senha: pedido do link, e-mail, nova senha e teste do login."""
+def _etapa_senha(config, linha, audit_root: Path, deps: Dependencias, res, cache: dict, secret_2fa: str,
+                 senha_preferida: str = ""):
+    """2) Senha: pedido do link, e-mail, nova senha e teste do login. senha_preferida: a senha do
+    outro grau do mesmo tribunal, que tem de ser repetida (graus.py)."""
     record = linha.record
     deps.log("2/2 Credencial: nova senha pelo e-mail e teste de CPF + senha + 2FA")
     if "inbox" not in cache:
@@ -365,9 +404,9 @@ def _etapa_senha(config, linha, audit_root: Path, deps: Dependencias, res, cache
                                          observacao="PENDENTE - e-mail: " + inbox.motivo)
         return res
     lawyer = {"nome": record.nome_esperado, "cpf": record.cpf_esperado, "email": record.email,
-              "chave_2fa_exibir": secret_2fa if deps.extras.get("chave_na_planilha", True) else ""}
-    if cache.get("senha_preferida"):
-        lawyer["senha_preferida"] = cache["senha_preferida"]  # outro grau do mesmo tribunal: repete a senha
+              "chave_2fa_exibir": secret_2fa if deps.opcoes.chave_na_planilha else ""}
+    if senha_preferida:
+        lawyer["senha_preferida"] = senha_preferida
     res.credencial = deps.credencial(config, audit_root, lawyer, inbox, secret_2fa)
     secret_2fa = ""
     return res
@@ -475,7 +514,7 @@ def executar_lote(config: AppConfig, linhas: list, audit_root: Path, saida: Path
 def _fechar_caixa(deps: Dependencias, numero_linha: int) -> None:
     """Encerra a conexao IMAP do advogado que terminou (a caixa reabre sozinha se for usada de novo):
     nao fica uma conexao aberta por conta durante o lote inteiro."""
-    caixa = deps.extras.get("cache", {}).get(numero_linha, {}).get("inbox")
+    caixa = deps.cache.get(numero_linha, {}).get("inbox")
     fechar = getattr(caixa, "close", None)
     if callable(fechar):
         try:
@@ -563,26 +602,12 @@ def _conferir_certificados_windows(linhas: list, deps: Dependencias) -> None:
 
 
 # ------------------------------------------------------------- assistente
-def run_executar(audit_root: Path = Path("runtime/audit"), saida: Path = Path("entregas"),
-                 tribunal: str = "", planilha: str = "", ensaio: bool | None = None,
-                 deps: Dependencias | None = None, so_senha: bool = False) -> int:
-    from .config import load_config
-    from .planilha import gravar_modelo, ler_planilha
+def _escolher(opcoes: list[OpcaoTribunal], tribunal: str, deps: Dependencias) -> list[OpcaoTribunal]:
+    """1) Tribunal(is): os da linha de comando ou os que o operador responder, ja com a regra dos
+    dois graus aplicada (graus.py). Lista vazia = nada para executar."""
+    from . import graus
 
-    deps = deps or _dependencias_padrao()
     log = deps.log
-    if so_senha:
-        # Advogado ja cadastrado nesses tribunais: nao entra com o certificado (evita bloqueio por
-        # excesso de logins) e vai direto para nova senha + teste de login (+ entrega).
-        ensaio = False
-        deps.extras["so_senha"] = True
-        log("SO SENHA: sem login com certificado. Use apenas para tribunais onde o advogado JA tem cadastro.")
-
-    # 1) Tribunal(is)
-    opcoes = listar_tribunais()
-    if not opcoes:
-        log("Nenhum tribunal configurado em tribunais\\")
-        return 2
     escolhidos, invalidos = escolher_tribunais(opcoes, tribunal) if tribunal else ([], [])
     if invalidos:
         log("Nao reconhecido(s): " + ", ".join(invalidos))
@@ -596,8 +621,6 @@ def run_executar(audit_root: Path = Path("runtime/audit"), saida: Path = Path("e
         if invalidos:
             log("Nao reconhecido(s): " + ", ".join(invalidos) + ". Tente de novo.")
             escolhidos = []
-    from . import graus
-
     escolhidos, incluidos, incompletos = graus.completar(escolhidos, opcoes)
     for nome in incluidos:
         log(f"Regra dos dois graus: incluido {nome} (cadastro e senha sao feitos nos dois graus).")
@@ -605,12 +628,20 @@ def run_executar(audit_root: Path = Path("runtime/audit"), saida: Path = Path("e
         log(f"Regra dos dois graus: {nome_grupo} ficou de fora, falta o arquivo do outro grau em tribunais\\")
     if not escolhidos:
         log("Nenhum tribunal para executar.")
-        return 2
+        return []
     log("\nTribunais, nesta ordem:")
     for i, o in enumerate(escolhidos, start=1):
         log(f"  {i}. {o.nome}  {'[envio real liberado]' if o.liberado else '[so ensaio]'}")
+    return escolhidos
 
-    # 2) Modo
+
+def _definir_modo(escolhidos: list[OpcaoTribunal], ensaio: bool | None,
+                  deps: Dependencias) -> tuple[list[OpcaoTribunal], bool]:
+    """2) Ensaio ou real. No real ficam so os tribunais com envio liberado (e, na regra dos dois
+    graus, so os que tem os dois liberados). Lista vazia = cancelado."""
+    from . import graus
+
+    log = deps.log
     nao_liberados = [o for o in escolhidos if not o.liberado]
     if ensaio is None:
         if len(nao_liberados) == len(escolhidos):
@@ -624,19 +655,21 @@ def run_executar(audit_root: Path = Path("runtime/audit"), saida: Path = Path("e
         if len(nao_liberados) == len(escolhidos) or not deps.yes(
                 "Seguir so com os tribunais liberados (os outros ficam de fora)?", True):
             log("Cancelado. Rode em ensaio ou libere os tribunais.")
-            return 2
+            return [], ensaio
         escolhidos, fora = graus.so_grupos_inteiros([o for o in escolhidos if o.liberado])
         for nome_grupo in fora:
             log(f"Regra dos dois graus: {nome_grupo} ficou de fora, so um dos graus tem envio real liberado.")
         if not escolhidos:
             log("Cancelado. Libere os dois graus ou rode em ensaio.")
-            return 2
-    configs = [load_config(o.caminho) for o in escolhidos]
-    log("Modo: " + ("ENSAIO (nada e enviado nem assinado)" if ensaio else "REAL"))
-    for c in configs:
-        log(f"  - {c.tribunal}  ({c.base_url})")
+    return escolhidos, ensaio
 
-    # 3) Planilha
+
+def _ler_advogados(planilha: str, deps: Dependencias) -> tuple[list, int | None]:
+    """3) Planilha: pergunta o caminho se preciso, le e mostra quem esta pronto.
+    Devolve (advogados prontos, None) ou ([], codigo de saida) quando nao ha o que executar."""
+    from .planilha import gravar_modelo, ler_planilha
+
+    log = deps.log
     caminho = Path(planilha) if planilha else None
     while caminho is None or not caminho.exists():
         if caminho is not None:
@@ -645,10 +678,11 @@ def run_executar(audit_root: Path = Path("runtime/audit"), saida: Path = Path("e
                     f"Criar a planilha modelo em {PLANILHA_PADRAO} para voce preencher?", True):
                 gravar_modelo(PLANILHA_PADRAO)
                 log(f"Modelo criado: {PLANILHA_PADRAO}. Preencha (uma linha por advogado) e rode de novo.")
-                return 0
+                return [], 0
         resposta = deps.ask(f"Planilha dos advogados [{PLANILHA_PADRAO}]: ").strip().strip('"')
         caminho = Path(resposta) if resposta else PLANILHA_PADRAO
-    linhas = ler_planilha(caminho, password_provider=lambda: deps.secret("Senha para abrir a planilha de advogados"))
+    ler = deps.ler_planilha or ler_planilha
+    linhas = ler(caminho, password_provider=lambda: deps.secret("Senha para abrir a planilha de advogados"))
     _conferir_certificados_windows(linhas, deps)
     validas = [l for l in linhas if l.ok]
     invalidas = [l for l in linhas if not l.ok]
@@ -657,21 +691,26 @@ def run_executar(audit_root: Path = Path("runtime/audit"), saida: Path = Path("e
         log(f"  linha {l.numero_linha} ({l.nome or 'sem nome'}): " + "; ".join(l.erros))
     if not validas:
         log("Nada para executar.")
-        return 2
+        return [], 2
     for l in validas:
         origem = l.certificado_info if l.usa_windows else f"arquivo {l.certificado.name}"
         log(f"  linha {l.numero_linha}: {l.nome}  (OAB {l.record.oab_numero}/{l.record.oab_uf})  certificado: {origem}")
+    return validas, None
 
-    # 4) Opcoes e confirmacao
-    if "assistido" not in deps.extras:
-        deps.extras["assistido"] = deps.yes(
+
+def _confirmar(configs: list[AppConfig], validas: list, ensaio: bool, deps: Dependencias) -> bool | None:
+    """4) Opcoes que faltam e a confirmacao final. Devolve se advogado ja cadastrado tambem ganha
+    senha nova, ou None se o operador cancelou."""
+    log, opcoes = deps.log, deps.opcoes
+    if opcoes.assistido is None:
+        opcoes.assistido = deps.yes(
             "Modo assistido: se o robo tiver duvida num formulario, pausar para voce resolver no Edge "
             "(em vez de pular o advogado)?", True)
     nova_senha = False
-    if so_senha:
+    if opcoes.so_senha:
         nova_senha = True
     elif not ensaio:
-        if deps.extras.get("senha_via_email"):
+        if opcoes.senha_via_email:
             # Rota de credencial pelo e-mail: um advogado ja cadastrado sempre precisa de senha nova
             # (e, se o e-mail no PJe divergir, o bot alinha pelo cadastro). Perguntar e redundante.
             nova_senha = True
@@ -681,9 +720,51 @@ def run_executar(audit_root: Path = Path("runtime/audit"), saida: Path = Path("e
                                   "mesmo assim?", False)
         log("Abra o PJeOffice PRO antes de continuar (ele assina o login e o termo).")
     nomes = ", ".join(c.tribunal for c in configs)
-    acao = "ENSAIO" if ensaio else ("NOVA SENHA (sem cadastro)" if so_senha else "CADASTRO REAL")
+    acao = "ENSAIO" if ensaio else ("NOVA SENHA (sem cadastro)" if opcoes.so_senha else "CADASTRO REAL")
     if not deps.yes(f"Iniciar {acao} de {len(validas)} advogado(s) "
                     f"em {len(configs)} tribunal(is): {nomes}?", True):
+        return None
+    return nova_senha
+
+
+def run_executar(audit_root: Path = Path("runtime/audit"), saida: Path = Path("entregas"),
+                 tribunal: str = "", planilha: str = "", ensaio: bool | None = None,
+                 deps: Dependencias | None = None, so_senha: bool = False) -> int:
+    """Execucao geral: tribunal(is), modo, planilha, confirmacao e o lote. Codigo de saida:
+    0 = tudo certo; 1 = cancelado pelo operador; 2 = nada para executar; 3 = algum advogado ficou sem
+    credencial pronta (ou sem ensaio OK)."""
+    from .config import load_config
+
+    deps = deps or _dependencias_padrao()
+    log = deps.log
+    if so_senha:
+        deps.opcoes.so_senha = True
+    if deps.opcoes.so_senha:
+        # Advogado ja cadastrado nesses tribunais: nao entra com o certificado (evita bloqueio por
+        # excesso de logins) e vai direto para nova senha + teste de login (+ entrega).
+        ensaio = False
+        log("SO SENHA: sem login com certificado. Use apenas para tribunais onde o advogado JA tem cadastro.")
+
+    opcoes = listar_tribunais()
+    if not opcoes:
+        log("Nenhum tribunal configurado em tribunais\\")
+        return 2
+    escolhidos = _escolher(opcoes, tribunal, deps)
+    if not escolhidos:
+        return 2
+    escolhidos, ensaio = _definir_modo(escolhidos, ensaio, deps)
+    if not escolhidos:
+        return 2
+    configs = [load_config(o.caminho) for o in escolhidos]
+    log("Modo: " + ("ENSAIO (nada e enviado nem assinado)" if ensaio else "REAL"))
+    for c in configs:
+        log(f"  - {c.tribunal}  ({c.base_url})")
+
+    validas, codigo = _ler_advogados(planilha, deps)
+    if codigo is not None:
+        return codigo
+    nova_senha = _confirmar(configs, validas, ensaio, deps)
+    if nova_senha is None:
         log("Cancelado.")
         return 1
 
@@ -692,7 +773,7 @@ def run_executar(audit_root: Path = Path("runtime/audit"), saida: Path = Path("e
         por_tribunal = executar_tribunais(configs, validas, audit_root, saida, deps, rehearsal=ensaio,
                                           nova_senha_se_ja_cadastrado=nova_senha)
     finally:
-        deps.extras.pop("cache", None)  # senhas/chaves pedidas nesta execucao saem da memoria
+        deps.cache.clear()  # senhas/chaves pedidas nesta execucao saem da memoria
     resultados = [r for rs in por_tribunal.values() for r in rs]
     esperado = len(validas) * len(configs)
     if ensaio:

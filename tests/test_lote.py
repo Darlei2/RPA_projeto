@@ -7,7 +7,7 @@ import pytest
 from pje_rpa.config import ConfigurationError, load_config
 from pje_rpa.entrega import LinhaCredencial
 from pje_rpa.execucao import ResultadoCadastro
-from pje_rpa.lote import Dependencias, escolher_tribunal, executar_lote, listar_tribunais, run_executar
+from pje_rpa.lote import Dependencias, Opcoes, escolher_tribunal, executar_lote, listar_tribunais, run_executar
 from pje_rpa.planilha import gravar_modelo, ler_planilha
 
 PROJECT = Path(__file__).resolve().parents[1]
@@ -145,7 +145,7 @@ class Fake:
             entregar=lambda linhas, saida: setattr(self, "entregue", list(linhas)),
             store_factory=lambda: _Store(),
             log=self.log.append,
-            extras={"perguntar_2fa": False},
+            opcoes=Opcoes(perguntar_2fa=False),
         )
 
 
@@ -308,7 +308,7 @@ def test_varios_tribunais_em_sequencia_com_uma_entrega(pasta, monkeypatch):
     texto = "\n".join(fake.log)
     assert "TRIBUNAL 1/4: TRE-MG" in texto and "TRIBUNAL 3/4: TRT5 - 1o grau" in texto
     assert "TRIBUNAL 4/4: TRT5 - 2o grau" in texto and "RESUMO GERAL" in texto
-    assert "cache" not in deps.extras  # segredos saem da memoria no fim
+    assert deps.cache == {}  # segredos saem da memoria no fim
 
 
 def test_real_com_tribunal_nao_liberado_segue_so_com_os_liberados(pasta, monkeypatch, tmp_path):
@@ -407,7 +407,7 @@ def test_senha_pelo_login_unico_dispensa_o_email(pasta):
 
     deps.cadastrar = cadastrar
     deps.abrir_caixa = lambda *a, **k: (_ for _ in ()).throw(AssertionError("nao deveria abrir a caixa de e-mail"))
-    deps.extras["testar_senha"] = testar
+    deps.testar_senha = testar
     res = executar_lote(_config(), linhas, pasta / "audit", pasta / "out", deps,
                         rehearsal=False, nova_senha_se_ja_cadastrado=True)
     assert pedidos == [(True, True)] and testadas == ["SenhaDoSSO123"]
@@ -422,7 +422,7 @@ def test_sem_email_nao_cai_no_esqueci_minha_senha(pasta):
     deps = fake.deps()
     deps.cadastrar = lambda *a, **k: ResultadoCadastro("COMPLETED", "ok", "run", senha_detalhe="nao ofereceu")
     deps.abrir_caixa = lambda *a, **k: (_ for _ in ()).throw(AssertionError("nao deveria abrir a caixa de e-mail"))
-    deps.extras["sem_email"] = True
+    deps.opcoes.sem_email = True
     res = executar_lote(_config(), linhas, pasta / "audit", pasta / "out", deps,
                         rehearsal=False, nova_senha_se_ja_cadastrado=False)
     assert res[0].cadastro == "COMPLETED" and not res[0].login_ok
@@ -436,7 +436,7 @@ def test_via_email_pula_o_login_unico_e_nao_loga_no_gmail(pasta, monkeypatch):
     linhas = ler_planilha(_xlsx(pasta / "a.xlsx", [_linha()]))
     fake = Fake()
     deps = fake.deps()
-    deps.extras["senha_via_email"] = True
+    deps.opcoes.senha_via_email = True
     kwargs_vistos = {}
 
     def cadastrar(config, record, pfx, pwd, code_provider, audit_root, **kw):
@@ -461,5 +461,52 @@ def test_via_email_pula_o_login_unico_e_nao_loga_no_gmail(pasta, monkeypatch):
     assert isinstance(lote._abrir_caixa("x@gmail.com", "", "", "", deps, "", ""), lote.CaixaPendente)
     assert isinstance(lote._abrir_caixa("x@outlook.com", "", "", "", deps, "senha-email", "CHAVE2FA"),
                       lote.CaixaPendente)
-    deps.extras.pop("senha_via_email")  # fora da rota pelo e-mail continua perguntando
+    deps.opcoes.senha_via_email = False  # fora da rota pelo e-mail continua perguntando
     assert lote._abrir_caixa("x@outlook.com", "", "", "", deps, "", "") == "SEM_GMAIL"
+
+
+# ------------------------------------------------------------ pontos de encaixe
+def test_ja_feito_pula_o_advogado_antes_de_qualquer_login(pasta):
+    """Quem estende o robo diz, por advogado e tribunal, o que nao precisa ser refeito."""
+    linhas = ler_planilha(_xlsx(pasta / "a.xlsx", [_linha(), _linha(nome="SEGUNDO ADVOGADO", cpf="01234567890")]))
+    fake = Fake()
+    deps = fake.deps()
+    vistos = []
+
+    def ja_feito(config, linha):
+        vistos.append((config.tribunal, linha.nome))
+        return "ja tem credencial #123" if linha.nome == "ADVOGADA DE TESTE" else ""
+
+    deps.ja_feito = ja_feito
+    res = executar_lote(_config(), linhas, pasta / "audit", pasta / "out", deps,
+                        rehearsal=False, nova_senha_se_ja_cadastrado=False)
+    assert [(r.cadastro, r.motivo) for r in res] == [("JA_FEITO", "ja tem credencial #123"), ("COMPLETED", "ok")]
+    assert [c[0] for c in fake.cadastros] == ["SEGUNDO ADVOGADO"] and fake.credenciais == ["01234567890"]
+    assert len(vistos) == 2 and "ja tem credencial #123" in "\n".join(fake.log)
+    # no ensaio nada e pulado: o ensaio nao troca senha nem cria credencial
+    fake = Fake(cadastro=["REHEARSAL_OK"] * 2)
+    deps = fake.deps()
+    deps.ja_feito = lambda config, linha: "ja tem"
+    res = executar_lote(_config(), linhas, pasta / "audit", pasta / "out", deps,
+                        rehearsal=True, nova_senha_se_ja_cadastrado=False)
+    assert [r.cadastro for r in res] == ["REHEARSAL_OK", "REHEARSAL_OK"]
+
+
+def test_leitura_da_planilha_pode_ser_trocada(pasta, monkeypatch):
+    """Quem estende o robo pode ler a planilha do seu jeito (ex.: acrescentar segredos so em memoria)."""
+    monkeypatch.chdir(PROJECT)
+    planilha = _xlsx(pasta / "a.xlsx", [_linha()])
+    fake = Fake(cadastro=["REHEARSAL_OK"])
+    deps = fake.deps()
+    chamadas = []
+
+    def ler(caminho, password_provider=lambda: ""):
+        chamadas.append(caminho)
+        linhas = ler_planilha(caminho, password_provider=password_provider)
+        linhas[0].dados["senha_certificado"] = "veio-do-encaixe"
+        return linhas
+
+    deps.ler_planilha = ler
+    assert run_executar(pasta / "audit", pasta / "out", tribunal="tjap", planilha=str(planilha),
+                        ensaio=True, deps=deps) == 0
+    assert chamadas == [planilha] and fake.cadastros[0][1] == "veio-do-encaixe"

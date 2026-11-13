@@ -114,7 +114,7 @@ def test_abrir_caixa_gera_senha_de_app_uma_vez_e_guarda(monkeypatch):
     monkeypatch.setattr(cofre_local, "apagar", lambda email, *a, **k: guardado.pop(email, None))
     monkeypatch.setattr(gmail_senha_app, "gerar_senha_de_app",
                         lambda e, s, c, **k: geradas.append(e) or "abcdefghijklmnop")
-    deps = SimpleNamespace(log=lambda m: None, extras={}, secret=lambda p: "")
+    deps = SimpleNamespace(log=lambda m: None, opcoes=lote.Opcoes(), secret=lambda p: "")
 
     caixa = lote._abrir_caixa("fulana@gmail.com", "", "", "", deps, "senha-email", CHAVE)
     assert caixa.password == "abcdefghijklmnop" and geradas == ["fulana@gmail.com"]

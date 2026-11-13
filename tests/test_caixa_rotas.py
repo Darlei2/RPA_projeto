@@ -80,9 +80,10 @@ def test_imap_religa_se_a_conexao_cair_e_fecha_no_fim():
     assert inbox._conn is None and not inbox._lidas
 
 
-def _deps(**extras):
+def _deps(cache=None, **opcoes):
     logs = []
-    return SimpleNamespace(log=logs.append, extras=extras, secret=lambda p: "", ask=lambda p: ""), logs
+    return SimpleNamespace(log=logs.append, opcoes=lote.Opcoes(**opcoes), cache=cache or {},
+                           secret=lambda p: "", ask=lambda p: ""), logs
 
 
 def _preparar(monkeypatch, imap_ok=True):

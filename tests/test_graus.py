@@ -69,7 +69,7 @@ class Fake:
             store_factory=lambda: type("S", (), {"remove": lambda self, t: None})(),
             log=self.log.append,
             # rota pelo e-mail: a senha sai do passo "credencial" (como no uso com -ViaEmail)
-            extras={"perguntar_2fa": False, "senha_via_email": True},
+            opcoes=lote.Opcoes(perguntar_2fa=False, senha_via_email=True),
         )
 
 
@@ -199,7 +199,7 @@ def test_senha_pelo_login_unico_tambem_e_repetida(tmp_path):
     linhas = ler_planilha(_planilha(tmp_path))
     fake = Fake()
     deps = fake.deps()
-    deps.extras.pop("senha_via_email")
+    deps.opcoes.senha_via_email = False
 
     def cadastrar(config, record, pfx, pwd, code_provider, audit_root, **kw):
         fake.cadastros.append((config.tribunal, kw.get("senha_preferida", "")))
@@ -210,7 +210,7 @@ def test_senha_pelo_login_unico_tambem_e_repetida(tmp_path):
         linha.senha_cadastrada = linha.login_testado = True
         return linha
 
-    deps.cadastrar, deps.extras["testar_senha"] = cadastrar, testar
+    deps.cadastrar, deps.testar_senha = cadastrar, testar
     executar_tribunais([_cfg("trt5"), _cfg("trt5-2g")], linhas, tmp_path / "audit", tmp_path / "out",
                        deps, rehearsal=False, nova_senha_se_ja_cadastrado=True)
     assert fake.cadastros == [("TRT5 - 1o grau", ""), ("TRT5 - 2o grau", "senha-sso")]
