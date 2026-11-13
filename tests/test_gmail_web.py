@@ -71,7 +71,7 @@ def pagina(tmp_path):
             return route.fulfill(status=200, content_type="application/json", body=json.dumps(estado["mensagens"]))
         return route.fulfill(status=200, content_type="text/html", body=GMAIL)
 
-    def abrir_contexto(pw, perfil, navegador):
+    def abrir_contexto(pw, perfil, navegador, headless=False):
         estado["contextos"] += 1
         contexto = pw.chromium.launch().new_context()
         contexto.route("https://accounts.google.com/**", contas)
@@ -79,7 +79,7 @@ def pagina(tmp_path):
         return contexto
 
     def caixa(**kw):
-        kw.setdefault("abrir_edge_normal", lambda perfil, url: estado.__setitem__("edge_normal", estado["edge_normal"] + 1))
+        kw.setdefault("abrir_navegador_normal", lambda perfil, url, nav="": estado.__setitem__("edge_normal", estado["edge_normal"] + 1))
         kw.setdefault("abrir_contexto", abrir_contexto)
         return GmailWebInbox("fulana@gmail.com", "senha-do-email", CHAVE, perfil=tmp_path / "perfil", poll_s=1, **kw)
 
@@ -163,7 +163,7 @@ def test_teste_de_uma_conta_avisa_as_colunas_que_faltam(monkeypatch, capsys):
 def test_erro_do_navegador_nunca_mostra_a_senha(pagina):
     estado, caixa = pagina
 
-    def quebra(pw, perfil, navegador):
+    def quebra(pw, perfil, navegador, headless=False):
         raise RuntimeError('fill("senha-do-email") falhou')
 
     with pytest.raises(GmailError) as erro:

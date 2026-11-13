@@ -1,14 +1,17 @@
-"""Caixa do Gmail lida pelo NAVEGADOR: rota de teste para conta sem senha de app (sem IMAP).
+"""Caixa do Gmail lida pelo NAVEGADOR, sem senha de app (sem IMAP).
 
-Ideia (a mesma do parceiro que loga pela interface): o Edge abre com um PERFIL SALVO por conta
-de e-mail (runtime\\gmail-perfis\\<codigo>, fora do Git). O login com e-mail, senha e codigo do
-autenticador e feito uma vez; nas proximas vezes a sessao ja esta salva e o robo so le a caixa.
+Quem abre o Chrome e o proprio robo (Start-Process no Windows), com um PERFIL SALVO por conta de
+e-mail (runtime\\gmail-perfis\\<codigo>, fora do Git) e uma porta de depuracao. O Playwright
+NAO abre o navegador: ele apenas CONECTA (connect_over_cdp) ao Chrome ja aberto para digitar o
+login e ler o link. Isso importa: o Chrome aberto pelo Playwright entra com a marca de automacao
+(navigator.webdriver = true, flag --enable-automation) que a tela de login do Google reconhece;
+o Chrome aberto normalmente, nao. O login (e-mail, senha e codigo do autenticador, gerado pelo
+totp.py) e feito uma vez; nas proximas vezes a sessao ja esta salva no perfil e o robo so le a caixa.
 
 Regras:
-- nada de contornar CAPTCHA, verificacao por celular ou "navegador nao seguro", e nada de
-  esconder do Google que o navegador e automatizado. Se o Google barrar o login automatico, o
-  robo abre um Edge NORMAL com o mesmo perfil, o operador faz o login a mao uma vez e a sessao
-  fica salva para o robo;
+- nada de contornar CAPTCHA, verificacao por celular ou "navegador nao seguro": nesses casos o
+  robo abre um Chrome normal com o mesmo perfil para o operador entrar a mao uma vez, e a sessao
+  fica salva;
 - senha, chave 2FA e links nunca aparecem em mensagens, logs ou auditoria;
 - cada acesso roda numa thread propria: o Playwright sincrono nao aceita dois navegadores na
   mesma thread e o do PJe pode estar aberto ao mesmo tempo.
@@ -19,10 +22,15 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import json
+import os
+import shutil
+import socket
 import subprocess
 import sys
 import threading
 import time
+import urllib.request
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -39,10 +47,90 @@ BUSCA = 'in:anywhere newer_than:2d {senha pje "jus.br"}'
 PERFIS = Path("runtime") / "gmail-perfis"
 _LINHAS = "div[role=main] tr.zA, div[role=main] tr[role=row]"
 
+# Onde o Chrome (ou o Edge) costuma estar no Windows. Pode ser trocado por --navegador <caminho>.
+_CHROME_WIN = (
+    r"C:\Program Files\Google\Chrome\Application\chrome.exe",
+    r"C:\Program Files (x86)\Google\Chrome\Application\chrome.exe",
+    r"%LOCALAPPDATA%\Google\Chrome\Application\chrome.exe",
+    r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe",
+    r"C:\Program Files\Microsoft\Edge\Application\msedge.exe",
+)
+
 
 def pasta_do_perfil(email: str, raiz: Path = PERFIS) -> Path:
-    """Uma pasta de perfil do Edge por conta; o nome nao revela o e-mail."""
+    """Uma pasta de perfil do navegador por conta; o nome nao revela o e-mail."""
     return raiz / hashlib.sha256(email.strip().lower().encode()).hexdigest()[:16]
+
+
+def achar_navegador(preferido: str = "") -> str:
+    """Caminho do Chrome (ou Edge) na maquina. `preferido` pode ser um caminho ou 'chrome'/'edge'."""
+    if preferido and os.path.sep in preferido and Path(os.path.expandvars(preferido)).exists():
+        return os.path.expandvars(preferido)
+    nomes = {"chrome": ("chrome", "google-chrome", "google-chrome-stable"),
+             "edge": ("msedge", "microsoft-edge")}.get(preferido.lower(), ())
+    for nome in nomes or ("chrome", "google-chrome", "google-chrome-stable", "msedge", "microsoft-edge"):
+        achado = shutil.which(nome)
+        if achado:
+            return achado
+    for caminho in _CHROME_WIN:
+        expandido = os.path.expandvars(caminho)
+        if (not preferido or preferido.lower() in expandido.lower()) and Path(expandido).exists():
+            return expandido
+    raise GmailError("nao encontrei o Chrome (nem o Edge) nesta maquina; passe --navegador <caminho do .exe>")
+
+
+def _porta_livre() -> int:
+    s = socket.socket()
+    s.bind(("127.0.0.1", 0))
+    porta = s.getsockname()[1]
+    s.close()
+    return porta
+
+
+def _esperar_cdp(porta: int, prazo_s: float = 25) -> str:
+    """Espera o Chrome publicar o endpoint de depuracao e devolve a URL do WebSocket."""
+    fim = time.monotonic() + prazo_s
+    ultimo = ""
+    while time.monotonic() < fim:
+        try:
+            with urllib.request.urlopen(f"http://127.0.0.1:{porta}/json/version", timeout=1) as resp:
+                dados = json.load(resp)
+            if dados.get("webSocketDebuggerUrl"):
+                return f"http://127.0.0.1:{porta}"
+        except Exception as exc:  # noqa: BLE001 - ainda subindo
+            ultimo = type(exc).__name__
+        time.sleep(0.3)
+    raise GmailError(f"o Chrome nao abriu a porta de depuracao a tempo ({ultimo or 'sem resposta'})")
+
+
+def _args_navegador(navegador: str, perfil: Path, porta: int, url: str, headless: bool) -> list[str]:
+    args = [navegador, f"--remote-debugging-port={porta}", f"--user-data-dir={perfil.resolve()}",
+            "--no-first-run", "--no-default-browser-check", "--new-window"]
+    if headless:  # so em teste/servidor; na VM o login roda com janela visivel
+        args += ["--headless=new", "--disable-gpu"]
+        if sys.platform != "win32":
+            args.append("--no-sandbox")
+    return args + [url]
+
+
+def abrir_chrome_cdp(pw, perfil: Path, navegador: str, headless: bool = False):
+    """Abre o Chrome REAL (nao pelo Playwright) e conecta por CDP. Devolve o contexto ja aberto;
+    o processo do Chrome fica anexado em `_rpa_proc` para ser encerrado depois."""
+    caminho = achar_navegador(navegador)
+    porta = _porta_livre()
+    perfil.mkdir(parents=True, exist_ok=True)
+    proc = subprocess.Popen(_args_navegador(caminho, perfil, porta, LOGIN_URL, headless),
+                            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    try:
+        url_cdp = _esperar_cdp(porta)
+        browser = pw.chromium.connect_over_cdp(url_cdp)
+    except BaseException:
+        proc.terminate()
+        raise
+    contexto = browser.contexts[0] if browser.contexts else browser.new_context()
+    contexto._rpa_proc = proc  # encerrado no finally de _rodar
+    contexto._rpa_browser = browser
+    return contexto
 
 
 def na_caixa(page) -> bool:
@@ -100,31 +188,33 @@ def ler_links(page, max_conversas: int = 3) -> list[str]:
     return links
 
 
-def _abrir_edge_do_robo(pw, perfil: Path, navegador: str):
-    return pw.chromium.launch_persistent_context(str(perfil), channel=navegador, headless=False, locale="pt-BR")
-
-
-def _abrir_edge_normal(perfil: Path, url: str) -> None:
-    """Edge comum (sem automacao) no mesmo perfil, para o operador fazer o login a mao."""
+def _abrir_navegador_normal(perfil: Path, url: str, navegador: str = "") -> None:
+    """Chrome comum (sem depuracao, sem automacao) no mesmo perfil, para o operador logar a mao."""
     if sys.platform != "win32":
         return
-    subprocess.Popen(["cmd", "/c", "start", "", "msedge", f"--user-data-dir={perfil.resolve()}",
-                      "--no-first-run", url])
+    try:
+        caminho = achar_navegador(navegador)
+    except GmailError:
+        return
+    subprocess.Popen([caminho, f"--user-data-dir={perfil.resolve()}", "--no-first-run", url])
 
 
 @dataclass
 class GmailWebInbox:
-    """Mesma interface da caixa IMAP (known_links / wait_for_password_link), pelo navegador."""
+    """Mesma interface da caixa IMAP (known_links / wait_for_password_link), pelo navegador.
+
+    O robo abre o Chrome real por conta (perfil salvo) e conecta por CDP. Login so na 1a vez."""
 
     email: str
     senha: str
     chave_2fa: str
     assist: Assist | None = None  # mostra o motivo; "" = ja fiz o login, qualquer texto = desistir
     perfil: Path | None = None
-    navegador: str = "msedge"
+    navegador: str = "edge"  # Edge por padrao (igual ao resto do robo); "chrome" ou caminho do .exe tambem valem
+    headless: bool = False
     poll_s: int = 15
-    abrir_contexto: Callable = _abrir_edge_do_robo
-    abrir_edge_normal: Callable[[Path, str], None] = _abrir_edge_normal
+    abrir_contexto: Callable = abrir_chrome_cdp
+    abrir_navegador_normal: Callable[..., None] = _abrir_navegador_normal
     playwright_factory: Callable | None = None
     digitado: list[str] = field(default_factory=list)  # etapas digitadas no ultimo acesso
     login_manual: bool = False  # o ultimo acesso precisou do login a mao
@@ -191,7 +281,7 @@ class GmailWebInbox:
         pw = factory().start()
         contexto = None
         try:
-            contexto = self.abrir_contexto(pw, perfil, self.navegador)
+            contexto = self.abrir_contexto(pw, perfil, self.navegador, self.headless)
             page = contexto.pages[0] if contexto.pages else contexto.new_page()
             try:
                 entrar_no_google(page, LOGIN_URL, na_caixa, self.email, self.senha, self.chave_2fa, None,
@@ -199,15 +289,15 @@ class GmailWebInbox:
             except GmailError as exc:
                 if self.assist is None:
                     raise
-                # O Google barrou o login no navegador do robo. Nao contorna: o operador entra a
-                # mao num Edge normal, com o mesmo perfil, e a sessao fica salva para o robo.
-                contexto.close()
+                # O Google barrou o login do robo. Nao contorna: o operador entra a mao num Chrome
+                # normal, com o mesmo perfil, e a sessao fica salva para o robo.
+                self._fechar(contexto)
                 contexto = None
-                self.abrir_edge_normal(perfil, LOGIN_URL)
+                self.abrir_navegador_normal(perfil, LOGIN_URL, self.navegador)
                 if self.assist(str(exc)).strip():
                     raise GmailError("login do Gmail nao concluido") from None
                 self.login_manual = True
-                contexto = self.abrir_contexto(pw, perfil, self.navegador)
+                contexto = self.abrir_contexto(pw, perfil, self.navegador, self.headless)
                 page = contexto.pages[0] if contexto.pages else contexto.new_page()
                 entrar_no_google(page, LOGIN_URL, na_caixa, self.email, self.senha, self.chave_2fa, None,
                                  prazo_s=60, destino="na caixa do Gmail", ao_digitar=self.digitado.append)
@@ -217,11 +307,27 @@ class GmailWebInbox:
         except Exception as exc:  # noqa: BLE001 - mensagem do Playwright pode conter o que foi digitado
             raise GmailError(f"Falha no navegador ao ler o Gmail ({type(exc).__name__})") from None
         finally:
+            self._fechar(contexto)
+            pw.stop()
+
+    @staticmethod
+    def _fechar(contexto) -> None:
+        if contexto is None:
+            return
+        browser = getattr(contexto, "_rpa_browser", None)
+        proc = getattr(contexto, "_rpa_proc", None)
+        try:
+            (browser or contexto).close()  # Browser.close via CDP: faz o Chrome sair e gravar a sessao
+        except Exception:  # noqa: BLE001
+            pass
+        if proc is not None:
             try:
-                if contexto is not None:
-                    contexto.close()
-            finally:
-                pw.stop()
+                proc.wait(timeout=10)  # espera o Chrome gravar cookies/sessao no perfil antes de seguir
+            except Exception:  # noqa: BLE001
+                try:
+                    proc.terminate()
+                except Exception:  # noqa: BLE001
+                    pass
 
 
 # ---------------------------------------------------------------------- teste de uma conta
@@ -238,7 +344,7 @@ def _linha_da_planilha(caminho: Path, numero: int, senha_planilha: Callable[[], 
 
 def _assist_console(motivo: str) -> str:
     print(f"\n  >>> Gmail: {motivo}.")
-    print("      O robo NAO contorna isso. Abri um Edge normal com o perfil desta conta: faca o login nele")
+    print("      O robo NAO contorna isso. Abri o navegador normal com o perfil desta conta: faca o login nele")
     print("      (e-mail, senha e codigo do autenticador), espere a caixa abrir e FECHE essa janela.")
     return input("  [Enter] fiz o login e fechei a janela | [P] desistir: ")
 
@@ -249,7 +355,7 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Testa a leitura do Gmail pelo navegador para UMA linha da planilha")
     parser.add_argument("--linha", type=int, required=True, help="numero da linha na planilha (como no Excel)")
     parser.add_argument("--planilha", default="planilhas/advogados.xlsx")
-    parser.add_argument("--navegador", default="msedge")
+    parser.add_argument("--navegador", default="edge", help="edge (padrao), chrome ou o caminho do .exe")
     args = parser.parse_args(argv)
     try:
         dados = _linha_da_planilha(Path(args.planilha), args.linha,
@@ -275,7 +381,7 @@ def main(argv: list[str] | None = None) -> int:
         return "sessao ja estava salva (nao digitou nada)"
 
     try:
-        print("1/3 Login no Gmail (o Edge vai abrir)...")
+        print("1/3 Login no Gmail (o navegador vai abrir)...")
         caixa.check_login()
         print("    OK: " + como_entrou())
         print("2/3 Reabrindo para conferir se a sessao ficou salva...")
