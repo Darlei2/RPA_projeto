@@ -24,6 +24,7 @@ import argparse
 import hashlib
 import json
 import os
+import re
 import shutil
 import socket
 import subprocess
@@ -131,6 +132,18 @@ def abrir_chrome_cdp(pw, perfil: Path, navegador: str, headless: bool = False):
     contexto._rpa_proc = proc  # encerrado no finally de _rodar
     contexto._rpa_browser = browser
     return contexto
+
+
+def _pagina_controlada(contexto):
+    """Uma aba para o robo dirigir. Prefere a ja aberta no Google; senao abre uma limpa."""
+    paginas = list(getattr(contexto, "pages", []) or [])
+    for pg in paginas:
+        try:
+            if "google.com" in (pg.url or ""):
+                return pg
+        except Exception:  # noqa: BLE001
+            continue
+    return paginas[0] if paginas else contexto.new_page()
 
 
 def na_caixa(page) -> bool:
@@ -282,7 +295,7 @@ class GmailWebInbox:
         contexto = None
         try:
             contexto = self.abrir_contexto(pw, perfil, self.navegador, self.headless)
-            page = contexto.pages[0] if contexto.pages else contexto.new_page()
+            page = _pagina_controlada(contexto)
             try:
                 entrar_no_google(page, LOGIN_URL, na_caixa, self.email, self.senha, self.chave_2fa, None,
                                  destino="na caixa do Gmail", ao_digitar=self.digitado.append)
@@ -298,17 +311,36 @@ class GmailWebInbox:
                     raise GmailError("login do Gmail nao concluido") from None
                 self.login_manual = True
                 contexto = self.abrir_contexto(pw, perfil, self.navegador, self.headless)
-                page = contexto.pages[0] if contexto.pages else contexto.new_page()
+                page = _pagina_controlada(contexto)
                 entrar_no_google(page, LOGIN_URL, na_caixa, self.email, self.senha, self.chave_2fa, None,
                                  prazo_s=60, destino="na caixa do Gmail", ao_digitar=self.digitado.append)
             return trabalho(page)
         except GmailError:
             raise
         except Exception as exc:  # noqa: BLE001 - mensagem do Playwright pode conter o que foi digitado
-            raise GmailError(f"Falha no navegador ao ler o Gmail ({type(exc).__name__})") from None
+            raise GmailError("Falha no navegador ao ler o Gmail: "
+                             + self._motivo_limpo(exc, locals().get("page"))) from None
         finally:
             self._fechar(contexto)
             pw.stop()
+
+    def _motivo_limpo(self, exc: Exception, page=None) -> str:
+        """Mensagem do erro sem segredos (o Playwright repete o valor digitado em fill(...)), mais
+        a tela onde parou (so host e caminho, nunca a query)."""
+        msg = str(exc).split("\n", 1)[0]
+        for seg in (self.senha, self.chave_2fa, self.email):
+            if seg:
+                msg = msg.replace(seg, "***")
+        msg = re.sub(r'fill\((["\']).*?\1\)', "fill(***)", msg)
+        onde = ""
+        try:
+            if page is not None:
+                parsed = urlparse(page.url or "")
+                if parsed.netloc:
+                    onde = f" [tela: {parsed.netloc}{parsed.path}]"
+        except Exception:  # noqa: BLE001
+            pass
+        return (f"{type(exc).__name__}: {msg}"[:280]) + onde
 
     @staticmethod
     def _fechar(contexto) -> None:
