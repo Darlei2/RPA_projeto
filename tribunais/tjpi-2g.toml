@@ -1,0 +1,10 @@
+herda = "_comum.toml"
+
+# TJPI - 2o grau (TJPI-PJE-2G no Keymaker). O 1o grau (pje.tjpi.jus.br/1g) ainda nao tem arquivo.
+# Confirme com scripts\sondar.ps1 -Tribunal tjpi-2g
+# Libere o envio real (true/true) so depois de sondar + ensaio OK neste tribunal.
+[app]
+tribunal = "TJPI - 2o grau"
+base_url = "https://pje.tjpi.jus.br/2g/login.seam"
+selectors_approved = false
+allow_live_submission = false

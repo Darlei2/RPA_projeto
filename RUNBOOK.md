@@ -122,6 +122,10 @@ Resultados possíveis:
 ## 6. Expandir para novos tribunais
 
 Todos os arquivos de `tribunais\` herdam de `tribunais\_comum.toml` (`herda = "_comum.toml"`).
+O 2o grau de um tribunal que ja tem o 1o herda do arquivo do 1o grau (`tjap-2g.toml` herda `tjap.toml`):
+mesmos seletores, so muda o endereco. Nos TJs, TRFs e TREs cada grau tem cadastro, senha e credencial
+proprios; so nos TRTs os dois graus formam uma credencial (ver a regra dos dois graus, mais abaixo).
+Todo arquivo chega do Git com o envio real bloqueado.
 Um tribunal novo normalmente precisa so de `[app]` com `tribunal` e `base_url`; sobrescreva em
 `[selectors]` apenas o que for diferente naquele PJe.
 

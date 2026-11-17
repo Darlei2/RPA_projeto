@@ -1,0 +1,12 @@
+herda = "tjap.toml"
+
+# TJAP - 2o grau (TJAP-PJE-2G no Keymaker).
+# Herda do 1o grau (tjap.toml): mesmos seletores, so muda o endereco. Cada grau tem cadastro, senha e
+# credencial proprios (a regra de uma credencial para os dois graus vale so para os TRTs).
+# Confirme com scripts\sondar.ps1 -Tribunal tjap-2g
+# Libere o envio real (true/true) so depois de sondar + ensaio OK neste tribunal.
+[app]
+tribunal = "TJAP - 2o grau"
+base_url = "https://pje.tjap.jus.br/2g/login.seam"
+selectors_approved = false
+allow_live_submission = false

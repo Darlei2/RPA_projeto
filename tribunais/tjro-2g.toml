@@ -1,0 +1,12 @@
+herda = "tjro.toml"
+
+# TJRO - 2o grau (TJRO-PJE-2G no Keymaker). Servidor do 2o grau: pjesg.
+# Herda do 1o grau (tjro.toml): mesmos seletores, so muda o endereco. Cada grau tem cadastro, senha e
+# credencial proprios (a regra de uma credencial para os dois graus vale so para os TRTs).
+# Confirme com scripts\sondar.ps1 -Tribunal tjro-2g
+# Libere o envio real (true/true) so depois de sondar + ensaio OK neste tribunal.
+[app]
+tribunal = "TJRO - 2o grau"
+base_url = "https://pjesg.tjro.jus.br/pje/login.seam"
+selectors_approved = false
+allow_live_submission = false

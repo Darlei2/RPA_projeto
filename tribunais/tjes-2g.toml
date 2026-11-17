@@ -1,0 +1,12 @@
+herda = "tjes.toml"
+
+# TJES - 2o grau (TJES-PJE-2G no Keymaker). Tribunal de Justica e Turmas Recursais, caminho /pje2g/.
+# Herda do 1o grau (tjes.toml): mesmos seletores, so muda o endereco. Cada grau tem cadastro, senha e
+# credencial proprios (a regra de uma credencial para os dois graus vale so para os TRTs).
+# Confirme com scripts\sondar.ps1 -Tribunal tjes-2g
+# Libere o envio real (true/true) so depois de sondar + ensaio OK neste tribunal.
+[app]
+tribunal = "TJES - 2o grau"
+base_url = "https://pje.tjes.jus.br/pje2g/login.seam"
+selectors_approved = false
+allow_live_submission = false

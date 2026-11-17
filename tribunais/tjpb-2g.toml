@@ -1,0 +1,12 @@
+herda = "tjpb.toml"
+
+# TJPB - 2o grau (TJPB-PJE-2G no Keymaker). Caminho /pje2g/.
+# Herda do 1o grau (tjpb.toml): mesmos seletores, so muda o endereco. Cada grau tem cadastro, senha e
+# credencial proprios (a regra de uma credencial para os dois graus vale so para os TRTs).
+# Confirme com scripts\sondar.ps1 -Tribunal tjpb-2g
+# Libere o envio real (true/true) so depois de sondar + ensaio OK neste tribunal.
+[app]
+tribunal = "TJPB - 2o grau"
+base_url = "https://pje.tjpb.jus.br/pje2g/login.seam"
+selectors_approved = false
+allow_live_submission = false

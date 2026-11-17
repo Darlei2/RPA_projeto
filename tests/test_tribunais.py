@@ -19,6 +19,50 @@ def test_todo_tribunal_carrega_com_base_comum(path):
     assert "completion" in config.selectors and "confirm_data" in config.selectors
 
 
+def test_cada_endereco_e_cada_nome_de_tribunal_aparecem_uma_vez():
+    configs = [load_config(p) for p in TRIBUNAIS]
+    enderecos = [c.base_url for c in configs]
+    assert len(enderecos) == len(set(enderecos))
+    assert len({c.tribunal for c in configs}) == len(configs)
+
+
+# PJe dos TJs em que cada grau tem endereco, cadastro e credencial proprios (dominios <TJ>-PJE-1G/2G).
+SEGUNDO_GRAU_DOS_TJS = {
+    "tjap-2g": ("tjap", "https://pje.tjap.jus.br/2g/login.seam"),
+    "tjce-2g": ("tjce", "https://pje.tjce.jus.br/pje2grau/login.seam"),
+    "tjdft-2g": ("tjdft", "https://pje2i.tjdft.jus.br/pje/login.seam"),
+    "tjes-2g": ("tjes", "https://pje.tjes.jus.br/pje2g/login.seam"),
+    "tjma-2g": ("tjma", "https://pje2.tjma.jus.br/pje2g/login.seam"),
+    "tjpa-2g": ("tjpa", "https://pje.tjpa.jus.br/pje-2g/login.seam"),
+    "tjpb-2g": ("tjpb", "https://pje.tjpb.jus.br/pje2g/login.seam"),
+    "tjpe-2g": ("tjpe", "https://pje.cloud.tjpe.jus.br/2g/login.seam"),
+    "tjrn-2g": ("tjrn", "https://pje2g.tjrn.jus.br/pje/login.seam"),
+    "tjro-2g": ("tjro", "https://pjesg.tjro.jus.br/pje/login.seam"),
+}
+
+
+@pytest.mark.parametrize("chave", sorted(SEGUNDO_GRAU_DOS_TJS))
+def test_segundo_grau_dos_tjs_herda_o_primeiro_e_fica_fora_da_regra_dos_trts(chave):
+    from pje_rpa import exigencias, graus
+
+    primeiro, endereco = SEGUNDO_GRAU_DOS_TJS[chave]
+    segundo, base = load_config(PROJECT / "tribunais" / f"{chave}.toml"), load_config(PROJECT / "tribunais" / f"{primeiro}.toml")
+    assert segundo.base_url == endereco and segundo.base_url != base.base_url
+    assert segundo.tribunal == base.tribunal.replace("1o grau", "2o grau") != base.tribunal
+    assert segundo.selectors == base.selectors
+    # TJ nao entra na regra "os dois graus numa credencial" nem na exigencia de telefone dos TRTs
+    assert graus.grupo(segundo.base_url) == "" and exigencias.faltando(segundo.base_url, object()) == []
+
+
+def test_tribunais_novos_sem_primeiro_grau_no_robo():
+    for chave, tribunal, endereco in (("tjma", "TJMA - 1o grau", "https://pje.tjma.jus.br/pje/login.seam"),
+                                      ("tjro", "TJRO - 1o grau", "https://pjepg.tjro.jus.br/pje/login.seam"),
+                                      ("tjpi-2g", "TJPI - 2o grau", "https://pje.tjpi.jus.br/2g/login.seam"),
+                                      ("tse", "TSE", "https://pje.tse.jus.br/pje/login.seam")):
+        config = load_config(PROJECT / "tribunais" / f"{chave}.toml")
+        assert (config.tribunal, config.base_url) == (tribunal, endereco)
+
+
 def test_heranca_sobrescreve_so_o_declarado(tmp_path):
     (tmp_path / "base.toml").write_text(
         (PROJECT / "tribunais" / "_comum.toml").read_text(encoding="utf-8"), encoding="utf-8"

@@ -1,0 +1,12 @@
+herda = "tjpe.toml"
+
+# TJPE - 2o grau (TJPE-PJE-2G no Keymaker). Nuvem, como o 1o grau.
+# Herda do 1o grau (tjpe.toml): mesmos seletores, so muda o endereco. Cada grau tem cadastro, senha e
+# credencial proprios (a regra de uma credencial para os dois graus vale so para os TRTs).
+# Confirme com scripts\sondar.ps1 -Tribunal tjpe-2g
+# Libere o envio real (true/true) so depois de sondar + ensaio OK neste tribunal.
+[app]
+tribunal = "TJPE - 2o grau"
+base_url = "https://pje.cloud.tjpe.jus.br/2g/login.seam"
+selectors_approved = false
+allow_live_submission = false

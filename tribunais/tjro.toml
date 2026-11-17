@@ -1,0 +1,10 @@
+herda = "_comum.toml"
+
+# TJRO - 1o grau (TJRO-PJE-1G no Keymaker). Servidor do 1o grau: pjepg.
+# Confirme com scripts\sondar.ps1 -Tribunal tjro
+# Libere o envio real (true/true) so depois de sondar + ensaio OK neste tribunal.
+[app]
+tribunal = "TJRO - 1o grau"
+base_url = "https://pjepg.tjro.jus.br/pje/login.seam"
+selectors_approved = false
+allow_live_submission = false

@@ -1,0 +1,12 @@
+herda = "tjce.toml"
+
+# TJCE - 2o grau (TJCE-PJE-2G no Keymaker). Caminho /pje2grau/.
+# Herda do 1o grau (tjce.toml): mesmos seletores, so muda o endereco. Cada grau tem cadastro, senha e
+# credencial proprios (a regra de uma credencial para os dois graus vale so para os TRTs).
+# Confirme com scripts\sondar.ps1 -Tribunal tjce-2g
+# Libere o envio real (true/true) so depois de sondar + ensaio OK neste tribunal.
+[app]
+tribunal = "TJCE - 2o grau"
+base_url = "https://pje.tjce.jus.br/pje2grau/login.seam"
+selectors_approved = false
+allow_live_submission = false

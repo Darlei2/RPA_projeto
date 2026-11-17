@@ -1,0 +1,12 @@
+herda = "tjdft.toml"
+
+# TJDFT - 2o grau (TJDF-PJE-2G no Keymaker). Servidor proprio do 2o grau (pje2i).
+# Herda do 1o grau (tjdft.toml): mesmos seletores, so muda o endereco. Cada grau tem cadastro, senha e
+# credencial proprios (a regra de uma credencial para os dois graus vale so para os TRTs).
+# Confirme com scripts\sondar.ps1 -Tribunal tjdft-2g
+# Libere o envio real (true/true) so depois de sondar + ensaio OK neste tribunal.
+[app]
+tribunal = "TJDFT - 2o grau"
+base_url = "https://pje2i.tjdft.jus.br/pje/login.seam"
+selectors_approved = false
+allow_live_submission = false
