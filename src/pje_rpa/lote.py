@@ -119,6 +119,9 @@ class Dependencias:
       testar_senha(config, audit_root, lawyer, secret_2fa, senha) -> LinhaCredencial: teste do login;
       senha_existente(config, linha) -> senha: o advogado ja tem credencial neste tribunal. O robo so
         confere o login com ela e nao altera o que funciona (ver processar_advogado).
+      participa(config, linha) -> bool: quem entra em cada tribunal, quando o pedido nao e "todos os
+        advogados em todos os tribunais". Precisa responder igual para os dois graus do mesmo tribunal;
+      relatar(por_tribunal): recebe os resultados no fim da execucao (tribunal -> ResultadoAdvogado).
     """
     ask: Callable[[str], str]
     secret: Callable[[str], str]
@@ -134,6 +137,8 @@ class Dependencias:
     ler_planilha: Callable[..., list] | None = None
     testar_senha: Callable[..., LinhaCredencial] | None = None
     senha_existente: Callable[..., str] | None = None
+    participa: Callable[..., bool] | None = None
+    relatar: Callable[[dict], None] | None = None
     # Segredos pedidos uma vez por advogado (numero da linha -> dados), so em memoria: apagado no fim.
     cache: dict = field(default_factory=dict)
 
@@ -531,6 +536,11 @@ def _mostrar_diagnostico(audit_root: Path, resultado, log) -> None:
         pass
 
 
+def participantes(config: AppConfig, linhas: list, deps: Dependencias) -> list:
+    """As linhas que entram neste tribunal (todas, se nao ha pedido)."""
+    return [l for l in linhas if deps.participa(config, l)] if deps.participa else list(linhas)
+
+
 def executar_lote(config: AppConfig, linhas: list, audit_root: Path, saida: Path, deps: Dependencias, *,
                   rehearsal: bool, nova_senha_se_ja_cadastrado: bool,
                   entregar: bool = True) -> list[ResultadoAdvogado]:
@@ -547,6 +557,9 @@ def executar_lote(config: AppConfig, linhas: list, audit_root: Path, saida: Path
         pass
 
     resultados: list[ResultadoAdvogado] = []
+    linhas = participantes(config, linhas, deps)
+    if not linhas:
+        deps.log("Nenhum advogado do pedido neste tribunal.")
     try:
         for i, linha in enumerate(linhas, start=1):
             deps.log(f"\n[{i}/{len(linhas)}]")
@@ -786,6 +799,10 @@ def _confirmar(configs: list[AppConfig], validas: list, ensaio: bool, deps: Depe
     acao = ("ENSAIO" if ensaio else "NOVA SENHA (sem cadastro)" if opcoes.so_senha
             else "CONFERENCIA DA CREDENCIAL EXISTENTE (so completa o que falta)" if deps.senha_existente
             else "CADASTRO REAL")
+    if deps.participa:
+        log("Pelo pedido, entram em cada tribunal:")
+        for c in configs:
+            log(f"  {c.tribunal}: {len(participantes(c, validas, deps))} de {len(validas)} advogado(s)")
     if not deps.yes(f"Iniciar {acao} de {len(validas)} advogado(s) "
                     f"em {len(configs)} tribunal(is): {nomes}?", True):
         return None
@@ -830,8 +847,8 @@ def run_executar(audit_root: Path = Path("runtime/audit"), saida: Path = Path("e
         return codigo
     from . import exigencias
 
-    for l in validas:
-        for c in configs:
+    for c in configs:
+        for l in participantes(c, validas, deps):
             falta = exigencias.faltando(c.base_url, l.record)
             if falta:
                 log(f"  ATENCAO linha {l.numero_linha}: sem {' e '.join(falta)}, exigido em {c.tribunal}. "
@@ -848,7 +865,12 @@ def run_executar(audit_root: Path = Path("runtime/audit"), saida: Path = Path("e
     finally:
         deps.cache.clear()  # senhas/chaves pedidas nesta execucao saem da memoria
     resultados = [r for rs in por_tribunal.values() for r in rs]
-    esperado = len(validas) * len(configs)
+    if deps.relatar:
+        try:
+            deps.relatar(por_tribunal)
+        except Exception as exc:  # noqa: BLE001 - o relatorio nao pode esconder o resultado da execucao
+            log(f"(nao consegui gerar o relatorio: {type(exc).__name__})")
+    esperado = sum(len(participantes(c, validas, deps)) for c in configs)
     if ensaio:
         return 0 if len(resultados) == esperado and all(r.cadastro == "REHEARSAL_OK" for r in resultados) else 3
     return 0 if len(resultados) == esperado and all(r.login_ok for r in resultados) else 3

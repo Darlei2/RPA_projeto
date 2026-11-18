@@ -441,3 +441,50 @@ def test_assistente_avisa_antes_de_comecar_que_falta_o_telefone(tmp_path, monkey
     assert "ATENCAO linha 2: sem telefone (celular com DDD), exigido em TRT5 - 1o grau" in texto
     assert "exigido em TRT5 - 2o grau" in texto and "exigido em TJAP" not in texto
     assert [t for t, _, _ in fake.pedidos] == ["TJAP - 1o grau"]   # so o TJAP e feito
+
+
+# ------------------------------------------------------- pedido: quem vai em qual tribunal
+def test_pedido_define_quem_entra_em_cada_tribunal_e_recebe_os_resultados(tmp_path, monkeypatch):
+    """Cada advogado so e feito nos tribunais em que o pedido o inclui; no fim, quem chamou recebe
+    os resultados para montar o relatorio."""
+    trib = _tribunais_de_teste(tmp_path, {"trt5", "trt5-2g", "tjap"})
+    original = lote.listar_tribunais
+    monkeypatch.setattr(lote, "listar_tribunais", lambda pasta=trib: original(trib))
+    planilha = _planilha(tmp_path, [("ADVOGADA DE TESTE", "52998224725"), ("SEGUNDO ADVOGADO", "01234567890")])
+    fake = Fake(respostas=[str(planilha)])
+    deps = fake.deps()
+    # a primeira so no TRT5 (os dois graus); o segundo so no TJAP
+    pedido = {("52998224725", "trt5"), ("01234567890", "tjap")}
+    deps.participa = lambda config, linha: (linha.record.cpf_esperado, config.base_url.split(".")[1]) in pedido
+    recebido = {}
+    deps.relatar = recebido.update
+    assert run_executar(tmp_path / "audit", tmp_path / "out", tribunal="trt5, tjap", ensaio=False, deps=deps) == 0
+    assert fake.pedidos == [("TRT5 - 1o grau", "52998224725", ""), ("TRT5 - 2o grau", "52998224725", "senha-1"),
+                            ("TJAP - 1o grau", "01234567890", "")]
+    assert {t: [(r.nome, r.login_ok) for r in rs] for t, rs in recebido.items()} == {
+        "TRT5 - 1o grau": [("ADVOGADA DE TESTE", True)], "TRT5 - 2o grau": [("ADVOGADA DE TESTE", True)],
+        "TJAP - 1o grau": [("SEGUNDO ADVOGADO", True)]}
+    texto = "\n".join(fake.log)
+    assert "TRT5 - 1o grau: 1 de 2 advogado(s)" in texto and "TJAP - 1o grau: 1 de 2 advogado(s)" in texto
+
+
+def test_tribunal_sem_ninguem_do_pedido_nao_acessa_nada(tmp_path):
+    linhas = ler_planilha(_planilha(tmp_path))
+    fake = Fake()
+    deps = fake.deps()
+    deps.participa = lambda config, linha: False
+    por = executar_tribunais([_cfg("tjap")], linhas, tmp_path / "audit", tmp_path / "out", deps,
+                             rehearsal=False, nova_senha_se_ja_cadastrado=True)
+    assert por == {"TJAP - 1o grau": []} and fake.pedidos == [] and fake.cadastros == []
+    assert "Nenhum advogado do pedido neste tribunal." in fake.log
+
+
+def test_falha_no_relatorio_nao_esconde_o_resultado(tmp_path, monkeypatch):
+    trib = _tribunais_de_teste(tmp_path, {"tjap"})
+    original = lote.listar_tribunais
+    monkeypatch.setattr(lote, "listar_tribunais", lambda pasta=trib: original(trib))
+    fake = Fake(respostas=[str(_planilha(tmp_path))])
+    deps = fake.deps()
+    deps.relatar = lambda por_tribunal: 1 / 0
+    assert run_executar(tmp_path / "audit", tmp_path / "out", tribunal="tjap", ensaio=False, deps=deps) == 0
+    assert "(nao consegui gerar o relatorio: ZeroDivisionError)" in fake.log
