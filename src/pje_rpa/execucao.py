@@ -25,6 +25,10 @@ class ResultadoCadastro:
     run_id: str = ""
     senha: str = field(default="", repr=False)  # criada pelo login unico nesta sessao (nunca vai para log)
     senha_detalhe: str = ""
+    # Conferencia pedida com conferir_login: depois do cadastro, o robo saiu, entrou de novo com o
+    # certificado e chegou ao painel do advogado (o cadastro ficou gravado e o certificado entra).
+    login_conferido: bool = False
+    login_detalhe: str = ""
 
 
 def pending_path(audit_root: Path) -> Path:
@@ -64,9 +68,13 @@ def cadastrar(config: AppConfig, record: LawyerRecord, pfx: bytes | None, pfx_pa
               code_provider: Callable[[str], str | None], audit_root: Path, *,
               rehearsal: bool = False, notify: Notify = print, thumbprint: str = "",
               assist=None, senha_sso: bool = False, senha_sso_ja_cadastrado: bool = False,
-              senha_preferida: str = "",
+              senha_preferida: str = "", conferir_login: bool = False,
               store=None, browser_factory=None, signer_factory=None) -> ResultadoCadastro:
     """Roda o cadastro com o A1. Nao pede senha do PJe: isso e feito depois (credencial).
+
+    conferir_login: depois de concluir o cadastro, sai do PJe (sessao nova) e entra de novo com o
+    certificado para confirmar que o advogado chega ao painel. Nada e enviado nesse segundo login.
+    Quem ja era cadastrado nao precisa do segundo login: o primeiro ja abriu o painel.
 
     pfx = None: usa o certificado ja instalado no Windows com o CPF do advogado (ou o
     `thumbprint` indicado), sem instalar nem remover nada e sem senha do certificado.
@@ -163,12 +171,34 @@ def cadastrar(config: AppConfig, record: LawyerRecord, pfx: bytes | None, pfx_pa
                          result.state.value, {"ok": bool(senha)})
             notify(("  senha pelo login unico: OK - " if senha else "  senha pelo login unico: nao foi - ")
                    + senha_detalhe)
+        login_conferido, login_detalhe = False, ""
+        if conferir_login and not rehearsal:
+            if result.status.value == "ALREADY_REGISTERED":
+                login_conferido = True
+                login_detalhe = "o login com o certificado abriu o painel do advogado (ja era cadastrado)"
+            elif result.status.value == "COMPLETED":
+                notify("  conferindo o cadastro: saindo e entrando de novo com o certificado")
+                try:
+                    browser.reset_session()
+                    relogin = PJeRegistrationFlow(config, record, info, pfx_password, browser,
+                                                  signer_factory(config), audit, code_provider=code_provider,
+                                                  rehearsal=True, request_password=False).run()
+                    login_conferido = relogin.status.value == "ALREADY_REGISTERED"
+                    login_detalhe = ("o novo login com o certificado abriu o painel do advogado" if login_conferido
+                                     else f"o novo login nao chegou ao painel do advogado ({relogin.status.value})")
+                except Exception as exc:  # noqa: BLE001
+                    login_detalhe = f"falha no novo login de conferencia ({type(exc).__name__})"
+                audit.record("login_conferido" if login_conferido else "login_nao_conferido",
+                             result.state.value, {"ok": login_conferido})
+                notify("  conferencia do cadastro: " + ("OK - " if login_conferido else "NAO confirmou - ")
+                       + login_detalhe)
         serialized = asdict(result)
         serialized["status"] = result.status.value
         serialized["state"] = result.state.value
         audit.write_result(serialized)
         return ResultadoCadastro(result.status.value, result.reason, audit.run_id,
-                                 senha=senha, senha_detalhe=senha_detalhe)
+                                 senha=senha, senha_detalhe=senha_detalhe,
+                                 login_conferido=login_conferido, login_detalhe=login_detalhe)
     except (CertificateError, ConfigurationError) as exc:
         return ResultadoCadastro("ERROR", str(exc))
     except Exception as exc:  # noqa: BLE001

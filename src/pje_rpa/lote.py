@@ -106,8 +106,9 @@ class Opcoes:
     assistido: bool | None = None   # duvida no formulario: pausar para o operador (None = perguntar no inicio)
     perguntar_2fa: bool = True      # sem chave 2FA na planilha: perguntar ao operador
     chave_na_planilha: bool = True  # a chave 2FA acompanha a credencial na entrega
-    # A credencial e o certificado A1 + a chave 2FA (login pelo certificado): o robo faz so o cadastro
-    # e nao cria nem altera senha nenhuma. O login com o certificado no cadastro e o teste da credencial.
+    # A credencial e o certificado A1 + a chave 2FA (login pelo certificado): o robo faz o cadastro e
+    # nao cria nem altera senha nenhuma. O teste da credencial e um NOVO login com o certificado depois
+    # do cadastro (sessao nova), que tem de chegar ao painel do advogado.
     credencial_por_certificado: bool = False
 
 
@@ -411,6 +412,8 @@ def _processar_um(config: AppConfig, linha, audit_root: Path, deps: Dependencias
         kwargs["senha_sso_ja_cadastrado"] = nova_senha_se_ja_cadastrado
         if senha_do_outro_grau:
             kwargs["senha_preferida"] = senha_do_outro_grau
+    if deps.opcoes.credencial_por_certificado and not rehearsal:
+        kwargs["conferir_login"] = True   # depois do cadastro: sai, entra de novo e confere o painel
     if deps.opcoes.assistido:
         kwargs["assist"] = lambda report: _assistente(report, deps, rehearsal)
     if deps.store_factory:
@@ -423,7 +426,7 @@ def _processar_um(config: AppConfig, linha, audit_root: Path, deps: Dependencias
     _mostrar_diagnostico(audit_root, resultado, deps.log)
 
     if deps.opcoes.credencial_por_certificado and not rehearsal:
-        return _credencial_por_certificado(config, record, deps, res, resultado.status, secret_2fa)
+        return _credencial_por_certificado(config, record, deps, res, resultado, secret_2fa)
 
     pode_senha = resultado.status == "COMPLETED" or (
         resultado.status == "ALREADY_REGISTERED" and nova_senha_se_ja_cadastrado)
@@ -459,21 +462,27 @@ def _processar_um(config: AppConfig, linha, audit_root: Path, deps: Dependencias
     return _etapa_senha(config, linha, audit_root, deps, res, cache, secret_2fa, senha_do_outro_grau)
 
 
-def _credencial_por_certificado(config, record, deps: Dependencias, res, status: str, secret_2fa: str):
-    """A credencial e o certificado A1 + a chave 2FA. O cadastro so termina (COMPLETED) ou so reconhece
-    quem ja era cadastrado (ALREADY_REGISTERED) depois de entrar com o certificado e o codigo 2FA: esse
-    login e o teste da credencial. Nenhuma senha e criada nem alterada."""
-    if status not in ("COMPLETED", "ALREADY_REGISTERED"):
+def _credencial_por_certificado(config, record, deps: Dependencias, res, resultado, secret_2fa: str):
+    """A credencial e o certificado A1 + a chave 2FA; nenhuma senha e criada nem alterada. Ela so fica
+    pronta com o login CONFERIDO: depois do cadastro o robo sai, entra de novo com o certificado e o
+    codigo 2FA e chega ao painel do advogado (quem ja era cadastrado chega ao painel no primeiro login)."""
+    if resultado.status not in ("COMPLETED", "ALREADY_REGISTERED"):
         return res
     if not secret_2fa:
         res.motivo += " | sem a chave 2FA do advogado: a credencial por certificado precisa dela"
         deps.log("2/2 Credencial: sem a chave 2FA (Secret Key), a credencial por certificado nao pode ser criada.")
         return res
-    deps.log("2/2 Credencial: certificado A1 + 2FA (sem senha). O login com o certificado funcionou.")
+    conferido = bool(getattr(resultado, "login_conferido", False))
+    detalhe = getattr(resultado, "login_detalhe", "") or "o cadastro nao informou a conferencia do login"
     res.credencial = LinhaCredencial(
         config.tribunal, config.base_url, record.nome_esperado, record.cpf_esperado, record.email,
-        chave_2fa=secret_2fa if deps.opcoes.chave_na_planilha else "", login_testado=True,
-        por_certificado=True, observacao="login com certificado A1 + 2FA (sem senha)")
+        chave_2fa=secret_2fa if deps.opcoes.chave_na_planilha else "", login_testado=conferido,
+        por_certificado=True, observacao=detalhe)
+    if conferido:
+        deps.log("2/2 Credencial: certificado A1 + 2FA (sem senha). Login conferido: " + detalhe + ".")
+    else:
+        res.motivo += " | LOGIN NAO CONFIRMADO: " + detalhe
+        deps.log("2/2 Credencial: o login de conferencia NAO confirmou (" + detalhe + "). A credencial nao sobe.")
     return res
 
 

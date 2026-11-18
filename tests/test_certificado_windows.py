@@ -213,3 +213,62 @@ def test_sessao_do_login_unico_cai_depois_do_cadastro_robo_entra_de_novo(tmp_pat
     assert len(chamadas) == 2
     assert any("entrando de novo com o certificado" in m for m in mensagens)
     assert "SenhaNova123" not in " ".join(mensagens)
+
+
+def _cadastro_com_conferencia(tmp_path, depois_de_sair):
+    """Cadastro real simulado com conferir_login; `depois_de_sair` diz o que o PJe mostra no novo login."""
+    from pje_rpa.browser import SimulatedBrowser
+    from pje_rpa.execucao import cadastrar
+    from pje_rpa.signer import SimulatedSigner
+
+    class Navegador(SimulatedBrowser):
+        saidas = 0
+
+        def reset_session(self):
+            self.saidas += 1
+            self.stage = "closed"
+            self.scenario = depois_de_sair
+
+    config = dataclasses.replace(load_config(PROJECT / "tribunais" / "tjap.toml"),
+                                 selectors_approved=True, allow_live_submission=True)
+    linha = ler_planilha(_planilha(tmp_path, ""))[0]
+    nav = Navegador(linha.record)
+    mensagens = []
+    res = cadastrar(config, linha.record, None, "", lambda m: "000000", tmp_path / "audit",
+                    store=FakeStore(_installed(_cert("MARIA DA SILVA", CPF))),
+                    browser_factory=lambda cfg: nav, signer_factory=lambda cfg: SimulatedSigner(nav),
+                    notify=mensagens.append, conferir_login=True)
+    return res, nav, mensagens
+
+
+def test_conferencia_do_cadastro_sai_e_entra_de_novo_com_o_certificado(tmp_path):
+    """Depois de cadastrar, o robo abre uma sessao nova e so confirma se o novo login chega ao painel."""
+    res, nav, mensagens = _cadastro_com_conferencia(tmp_path, "already_registered")
+    assert res.status == "COMPLETED" and res.login_conferido and nav.saidas == 1, (res, mensagens)
+    assert "abriu o painel do advogado" in res.login_detalhe
+    assert any("saindo e entrando de novo com o certificado" in m for m in mensagens)
+    assert any("conferencia do cadastro: OK" in m for m in mensagens)
+
+
+def test_conferencia_do_cadastro_nao_confirma_se_o_novo_login_cai_no_formulario(tmp_path):
+    """O PJe mostra o formulario de cadastro de novo: o cadastro nao ficou gravado."""
+    res, nav, mensagens = _cadastro_com_conferencia(tmp_path, "success")
+    assert res.status == "COMPLETED" and not res.login_conferido and nav.saidas == 1, (res, mensagens)
+    assert "nao chegou ao painel do advogado" in res.login_detalhe
+    assert any("conferencia do cadastro: NAO confirmou" in m for m in mensagens)
+
+
+def test_quem_ja_era_cadastrado_e_conferido_no_primeiro_login(tmp_path):
+    from pje_rpa.browser import SimulatedBrowser
+    from pje_rpa.execucao import cadastrar
+    from pje_rpa.signer import SimulatedSigner
+
+    config = dataclasses.replace(load_config(PROJECT / "tribunais" / "tjap.toml"),
+                                 selectors_approved=True, allow_live_submission=True)
+    linha = ler_planilha(_planilha(tmp_path, ""))[0]
+    nav = SimulatedBrowser(linha.record, scenario="already_registered")
+    res = cadastrar(config, linha.record, None, "", lambda m: "000000", tmp_path / "audit",
+                    store=FakeStore(_installed(_cert("MARIA DA SILVA", CPF))),
+                    browser_factory=lambda cfg: nav, signer_factory=lambda cfg: SimulatedSigner(nav),
+                    notify=lambda m: None, conferir_login=True)
+    assert res.status == "ALREADY_REGISTERED" and res.login_conferido and "ja era cadastrado" in res.login_detalhe

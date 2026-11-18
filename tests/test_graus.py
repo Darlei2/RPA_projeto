@@ -506,15 +506,20 @@ def _planilha_com_chave(pasta: Path, chave=CHAVE_2FA) -> Path:
     return caminho
 
 
-def _por_certificado(fake, status_por_tribunal=None):
-    """deps do Fake no modo credencial por certificado; o cadastro devolve o status dado por tribunal."""
+def _por_certificado(fake, status_por_tribunal=None, nao_confere_em=()):
+    """deps do Fake no modo credencial por certificado; o cadastro devolve o status dado por tribunal
+    e, quando pedem a conferencia do login, diz que conferiu (menos nos tribunais de nao_confere_em)."""
     deps = fake.deps()
     deps.opcoes = lote.Opcoes(perguntar_2fa=False, credencial_por_certificado=True)
     chamadas = []
 
     def cadastrar(config, record, pfx, pwd, code_provider, audit_root, **kw):
         chamadas.append((config.tribunal, sorted(k for k in kw if k.startswith("senha"))))
-        return ResultadoCadastro((status_por_tribunal or {}).get(config.tribunal, "COMPLETED"), "ok", "run")
+        status = (status_por_tribunal or {}).get(config.tribunal, "COMPLETED")
+        conferiu = bool(kw.get("conferir_login")) and status in ("COMPLETED", "ALREADY_REGISTERED") \
+            and config.tribunal not in nao_confere_em
+        return ResultadoCadastro(status, "ok", "run", login_conferido=conferiu,
+                                 login_detalhe="painel aberto" if conferiu else "nao chegou ao painel (REHEARSAL_OK)")
 
     deps.cadastrar = cadastrar
     return deps, chamadas
@@ -571,3 +576,17 @@ def test_credencial_por_certificado_nao_combina_com_so_senha(tmp_path, monkeypat
     assert run_executar(tmp_path / "audit", tmp_path / "out", tribunal="tjap", ensaio=False, deps=deps) == 0
     assert "CADASTRO REAL (credencial por certificado, sem senha)" not in "\n".join(fake.log)  # a pergunta vai ao operador
     assert "nenhuma senha e criada nem alterada" in "\n".join(fake.log)
+
+
+def test_credencial_por_certificado_so_fica_pronta_com_o_login_conferido_depois_do_cadastro(tmp_path):
+    """O cadastro terminou, mas o novo login nao chegou ao painel: a credencial nao fica pronta."""
+    linhas = ler_planilha(_planilha_com_chave(tmp_path))
+    fake = Fake()
+    deps, chamadas = _por_certificado(fake, nao_confere_em={"TRT5 - 1o grau"})
+    por = executar_tribunais([_cfg("trt5"), _cfg("trt5-2g")], linhas, tmp_path / "audit", tmp_path / "out", deps,
+                             rehearsal=False, nova_senha_se_ja_cadastrado=False)
+    primeiro = por["TRT5 - 1o grau"][0]
+    assert not primeiro.login_ok and "LOGIN NAO CONFIRMADO: nao chegou ao painel" in primeiro.motivo
+    assert [t for t, _ in chamadas] == ["TRT5 - 1o grau"]            # sem o 1o grau pronto, o 2o nem e acessado
+    assert por["TRT5 - 2o grau"][0].cadastro == "PULADO"
+    assert [(c.tribunal, c.login_testado) for c in fake.entregue] == [("TRT5 - 1o grau", False)]
