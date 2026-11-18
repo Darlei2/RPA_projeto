@@ -215,3 +215,20 @@ def test_sem_telefone_e_campo_obrigatorio_vazio_vira_pendencia(pagina):
     page = pagina(html)
     report = adaptive_form.operate(page, COM_RG)
     assert report["pending"] == [] and page.input_value("#cel"), report
+
+
+def test_email_que_ja_vem_no_formulario_e_trocado_pelo_da_planilha(pagina):
+    """O PJe traz outro e-mail no formulario (editavel): vale o da planilha, sem perguntar ao operador."""
+    html = _form(depois_de_enviar=False).replace(
+        '<input id=em readonly value="advogado@example.com">', '<input id=em value="pessoal.antigo@example.com">')
+    page = pagina(html)
+    report = adaptive_form.operate(page, COM_RG)
+    assert "valor_preexistente_divergente:email" not in report["pending"], report
+    assert page.input_value("#em") == "advogado@example.com"
+    assert page.input_value("#emc") == "advogado@example.com"
+
+
+def test_identidade_que_diverge_no_formulario_continua_parando():
+    """So endereco de rua e e-mail sao trocados pelo valor da planilha; o resto continua parando."""
+    assert "email" in adaptive_form.PLANILHA_VENCE_KEYS
+    assert not {"nome", "cpf", "oab_numero", "oab_uf", "cidade", "uf"} & set(adaptive_form.PLANILHA_VENCE_KEYS)

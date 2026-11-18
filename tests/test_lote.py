@@ -14,12 +14,12 @@ PROJECT = Path(__file__).resolve().parents[1]
 
 CABECALHO = ["Nome completo", "CPF", "OAB", "UF da OAB", "E-mail", "Celular", "CEP", "Endereco",
              "Numero", "Complemento", "Bairro", "Municipio", "UF", "Autorizacao", "Certificado",
-             "Senha do certificado", "Executar"]
+             "Senha do certificado", "Executar", "rg_numero", "rg_orgao"]
 
 
 def _linha(nome="ADVOGADA DE TESTE", cpf="52998224725", pfx="adv.pfx", executar="", senha="", cep="01001000"):
     return [nome, cpf, "12345", "SP", "adv@exemplo.com.br", "11999999999", cep, "RUA A", "10", "",
-            "CENTRO", "SAO PAULO", "SP", "CONTRATO-1", pfx, senha, executar]
+            "CENTRO", "SAO PAULO", "SP", "CONTRATO-1", pfx, senha, executar, "123456789", "SSP/SP"]
 
 
 def _xlsx(path: Path, rows, numeric_cpf=False):

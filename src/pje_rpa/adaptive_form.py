@@ -386,6 +386,10 @@ ADDRESS_KEYS = ("cep", "logradouro", "address_number", "complemento", "bairro", 
 # Divergencia SO de endereco de rua: usa o valor da planilha e segue sem parar.
 # cidade/uf ficam de fora de proposito (divergencia maior merece conferencia).
 RUA_KEYS = ("cep", "logradouro", "address_number", "complemento", "bairro")
+# E-mail que o PJe ja traz no formulario e diverge do da planilha: o robo troca pelo da planilha sem
+# perguntar. O e-mail da planilha e o da caixa que controlamos; e nele que o PJe tem de falar.
+# cidade/uf e os dados de identidade (nome, CPF, OAB) continuam parando.
+PLANILHA_VENCE_KEYS = RUA_KEYS + ("email",)
 
 # Campos que parecem endereco/contato mas sao de outro assunto (RG, OAB, trabalho...).
 NOT_ADDRESS = re.compile(
@@ -1053,9 +1057,9 @@ def operate(
             )
         )
 
-        # Nao sobrescrever valores divergentes - EXCETO endereco de rua, que passa a
+        # Nao sobrescrever valores divergentes - EXCETO endereco de rua e e-mail, que passam a
         # usar o valor da planilha e seguir sem parar (decisao do operador).
-        if current["value"] and not placeholder and key not in RUA_KEYS:
+        if current["value"] and not placeholder and key not in PLANILHA_VENCE_KEYS:
             report["pending"].append(
                 "valor_preexistente_divergente:" + key
             )

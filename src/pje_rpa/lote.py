@@ -246,7 +246,7 @@ def _code_provider(secret_2fa: str, deps: Dependencias):
     return provider(secret_2fa) if secret_2fa else (lambda msg: deps.ask(f"{msg}: ") or None)
 
 
-def _chave_2fa(linha, deps: Dependencias) -> str:
+def _chave_2fa(linha, deps: Dependencias, perguntar: bool | None = None) -> str:
     from .senha_cli import _ask_2fa_key, _clean_2fa_key
     from .totp import normalizar_chave
 
@@ -256,7 +256,8 @@ def _chave_2fa(linha, deps: Dependencias) -> str:
             return normalizar_chave(_clean_2fa_key(raw))
         except ValueError:
             deps.log("  chave_2fa da planilha invalida; sera perguntada")
-    return _ask_2fa_key() if deps.opcoes.perguntar_2fa else ""
+    perguntar = deps.opcoes.perguntar_2fa if perguntar is None else perguntar
+    return _ask_2fa_key() if perguntar else ""
 
 
 def processar_advogado(config: AppConfig, linha, audit_root: Path, deps: Dependencias, *,
@@ -392,9 +393,17 @@ def _processar_um(config: AppConfig, linha, audit_root: Path, deps: Dependencias
         if not pfx_password:
             res.cadastro, res.motivo = "PULADO", "senha do certificado nao informada"
             return res
+    por_certificado = deps.opcoes.credencial_por_certificado
     if "secret_2fa" not in cache:
-        cache["secret_2fa"] = _chave_2fa(linha, deps)
+        # credencial por certificado: a chave 2FA faz parte da credencial; sem ela nao adianta perguntar
+        cache["secret_2fa"] = _chave_2fa(linha, deps, perguntar=False if por_certificado else None)
     secret_2fa = cache["secret_2fa"]
+    if por_certificado and not secret_2fa:
+        res.cadastro = "PULADO"
+        res.motivo = ("sem a chave 2FA (Secret Key) do advogado: a credencial por certificado precisa dela. "
+                      "Nada foi acessado.")
+        deps.log("PULADO: " + res.motivo)
+        return res
 
     if deps.opcoes.so_senha:
         res.cadastro, res.motivo = "NAO_TENTADO", "opcao so senha: cadastro nao conferido"

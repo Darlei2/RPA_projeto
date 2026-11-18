@@ -1,4 +1,5 @@
 """Tribunais com um cadastro por grau e uma credencial so (PJe-JT): os dois graus juntos e a mesma senha."""
+import re
 import shutil
 from pathlib import Path
 
@@ -14,7 +15,7 @@ from pje_rpa.planilha import ler_planilha
 PROJECT = Path(__file__).resolve().parents[1]
 CABECALHO = ["Nome completo", "CPF", "OAB", "UF da OAB", "E-mail", "Celular", "CEP", "Endereco",
              "Numero", "Complemento", "Bairro", "Municipio", "UF", "Autorizacao", "Certificado",
-             "Senha do certificado", "Executar"]
+             "Senha do certificado", "Executar", "rg_numero", "rg_orgao"]
 
 
 def _planilha(pasta: Path, advogados=(("ADVOGADA DE TESTE", "52998224725"),)) -> Path:
@@ -26,7 +27,7 @@ def _planilha(pasta: Path, advogados=(("ADVOGADA DE TESTE", "52998224725"),)) ->
     ws.append(CABECALHO)
     for nome, cpf in advogados:
         ws.append([nome, cpf, "12345", "SP", "adv@exemplo.com.br", "11999999999", "01001000", "RUA A", "10", "",
-                   "CENTRO", "SAO PAULO", "SP", "CONTRATO-1", "adv.pfx", "", ""])
+                   "CENTRO", "SAO PAULO", "SP", "CONTRATO-1", "adv.pfx", "", "", "123456789", "SSP/SP"])
     wb.save(pasta / "a.xlsx")
     return pasta / "a.xlsx"
 
@@ -223,9 +224,8 @@ def _tribunais_de_teste(tmp_path, liberados):
     trib.mkdir()
     for nome in ("_comum.toml", "trt5.toml", "trt5-2g.toml", "tjap.toml"):
         texto = (PROJECT / "tribunais" / nome).read_text(encoding="utf-8")
-        if nome[:-5] in liberados:
-            texto = texto.replace("selectors_approved = false", "selectors_approved = true") \
-                         .replace("allow_live_submission = false", "allow_live_submission = true")
+        valor = "true" if nome[:-5] in liberados else "false"   # vale o do teste, nao o da maquina
+        texto = re.sub(r"(selectors_approved|allow_live_submission) = (true|false)", rf"\1 = {valor}", texto)
         (trib / nome).write_text(texto, encoding="utf-8")
     return trib
 
@@ -385,12 +385,16 @@ def test_trt_exige_telefone_e_os_outros_nao():
 
     from pje_rpa import exigencias
 
-    sem, com = SimpleNamespace(telefone=""), SimpleNamespace(telefone="71999998888")
+    rg = {"rg_numero": "123456789", "rg_orgao": "SSP/BA"}
+    sem, com = SimpleNamespace(telefone="", **rg), SimpleNamespace(telefone="71999998888", **rg)
+    sem_rg = SimpleNamespace(telefone="71999998888", rg_numero="", rg_orgao="")
     for url in ("https://pje.trt5.jus.br/primeirograu/login.seam", "https://pje.trt15.jus.br/segundograu/login.seam"):
         assert exigencias.faltando(url, sem) == ["telefone (celular com DDD)"] and exigencias.faltando(url, com) == []
+        # o formulario dos TRTs tambem exige o RG: sem ele a linha e pulada antes de qualquer acesso
+        assert exigencias.faltando(url, sem_rg) == ["numero do RG", "orgao emissor do RG"]
     for url in ("https://pje1g-mg.tse.jus.br/pje/login.seam", "https://pje1g.trf1.jus.br/pje/login.seam",
                 "https://pje.tjap.jus.br/1g/login.seam", ""):
-        assert exigencias.faltando(url, sem) == []
+        assert exigencias.faltando(url, sem) == [] and exigencias.faltando(url, sem_rg) == []
 
 
 def _sem_telefone(tmp_path):
@@ -553,16 +557,6 @@ def test_credencial_por_certificado_primeiro_grau_sem_cadastro_nao_faz_o_segundo
     assert "a credencial do TRT5 vale para os dois graus" in por["TRT5 - 2o grau"][0].motivo
 
 
-def test_credencial_por_certificado_sem_chave_2fa_nao_fica_pronta(tmp_path):
-    linhas = ler_planilha(_planilha(tmp_path))        # planilha sem a chave 2FA
-    fake = Fake()
-    deps, _ = _por_certificado(fake)
-    por = executar_tribunais([_cfg("tjap")], linhas, tmp_path / "audit", tmp_path / "out", deps,
-                             rehearsal=False, nova_senha_se_ja_cadastrado=False)
-    resultado = por["TJAP - 1o grau"][0]
-    assert resultado.credencial is None and "sem a chave 2FA" in resultado.motivo and fake.entregue is None
-
-
 def test_credencial_por_certificado_nao_combina_com_so_senha(tmp_path, monkeypatch):
     trib = _tribunais_de_teste(tmp_path, {"tjap"})
     original = lote.listar_tribunais
@@ -590,3 +584,17 @@ def test_credencial_por_certificado_so_fica_pronta_com_o_login_conferido_depois_
     assert [t for t, _ in chamadas] == ["TRT5 - 1o grau"]            # sem o 1o grau pronto, o 2o nem e acessado
     assert por["TRT5 - 2o grau"][0].cadastro == "PULADO"
     assert [(c.tribunal, c.login_testado) for c in fake.entregue] == [("TRT5 - 1o grau", False)]
+
+
+def test_credencial_por_certificado_sem_chave_2fa_e_pulada_sem_perguntar_e_sem_acessar(tmp_path):
+    """Sem a Secret Key nao ha credencial por certificado: o robo nao pergunta nada e nao entra no tribunal."""
+    linhas = ler_planilha(_planilha(tmp_path))        # planilha sem a chave 2FA
+    fake = Fake()
+    deps, chamadas = _por_certificado(fake)
+    deps.opcoes.perguntar_2fa = True                  # mesmo com a pergunta ligada, neste tipo ela nao e feita
+    deps.ask = lambda p: (_ for _ in ()).throw(AssertionError("nao era para perguntar: " + p))
+    por = executar_tribunais([_cfg("trt5"), _cfg("trt5-2g")], linhas, tmp_path / "audit", tmp_path / "out", deps,
+                             rehearsal=False, nova_senha_se_ja_cadastrado=False)
+    assert chamadas == [] and fake.entregue is None
+    assert [r.cadastro for rs in por.values() for r in rs] == ["PULADO", "PULADO"]
+    assert "sem a chave 2FA" in por["TRT5 - 1o grau"][0].motivo and "Nada foi acessado" in por["TRT5 - 1o grau"][0].motivo

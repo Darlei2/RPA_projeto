@@ -192,6 +192,12 @@ cadastro com o A1 -> termo assinado -> "Solicitar nova senha" -> link do e-mail 
   graus, entao linha sem telefone e pulada nos TRTs antes de qualquer acesso (regra em
   `src/pje_rpa/exigencias.py`). Nos demais tribunais, sem telefone na planilha o robo mantem o que o PJe
   ja mostra; se o campo for obrigatorio e estiver vazio, para nesse campo.
+- Os TRTs tambem exigem `rg_numero` e `rg_orgao`: linha sem eles e pulada nos TRTs antes de qualquer acesso.
+- E-mail que o PJe ja traz no formulario e diverge do da planilha: o robo troca pelo da planilha sem
+  perguntar (como ja faz com o endereco de rua). Nome, CPF, OAB, cidade e UF divergentes continuam parando.
+- Codigo de segundo fator: o robo confere que o campo ficou preenchido e, se a tela continuar pedindo o
+  codigo, tenta mais uma vez com um codigo novo. Sao so duas tentativas, para nao bloquear o usuario.
+- Credencial por certificado (A1 + 2FA): linha sem a chave 2FA e pulada sem perguntar e sem acessar o tribunal.
 - Colunas obrigatorias: nome, cpf, oab_numero, oab_uf, email, cep, logradouro, numero,
   bairro, cidade, uf. `autorizacao_ref` e opcional (se preenchida, fica na auditoria).
 - Coluna `certificado`: **vazia** = usa o A1 ja instalado no Windows (Cert:\CurrentUser\My) com o

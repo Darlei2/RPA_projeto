@@ -13,6 +13,11 @@ from .signer import SignerError, SignerPort
 
 # Tempo maximo para o PDPJ sair da tela de login (ou do 2FA) depois da acao do usuario/PJeOffice.
 LOGIN_TIMEOUT_MS = 90_000
+# Codigo de segundo fator: se a tela continua pedindo o codigo, o robo tenta de novo com um codigo
+# NOVO (o campo pode ter ficado em branco, ou o codigo virou no meio do envio). Poucas tentativas de
+# proposito: codigo errado repetido pode bloquear o usuario no login unico.
+CODIGOS_2FA = 2
+ESPERA_CODIGO_2FA_MS = 25_000
 
 # Recebe a mensagem a exibir e devolve o codigo do segundo fator (ou None se expirar).
 CodeProvider = Callable[[str], "str | None"]
@@ -106,23 +111,35 @@ class PJeRegistrationFlow:
 
         if self.browser.visible("second_factor", 8000):
             self._transition(FlowState.SECOND_FACTOR, "second_factor_detected")
-            code = self.code_provider(
-                "O PJe pediu o codigo de segundo fator, enviado ao e-mail/celular do advogado."
-            )
-            if not code:
-                return self._needs_human("Codigo de segundo fator nao informado a tempo")
-            self.browser.fill("second_factor_input", code.strip())
-            try:
-                self.browser.click("second_factor_submit")
-            except Exception:
-                # A tela do 2FA pode enviar sozinha ao completar o codigo: o botao some no meio do
-                # clique. Se o campo do codigo ja saiu da tela, o login seguiu.
-                if self.browser.visible("second_factor_input", 1000):
-                    raise
-            if isinstance(self.browser, SimulatedBrowser):
-                self.browser.human_completed_second_factor()
-            if not self.browser.wait_hidden("second_factor_input", LOGIN_TIMEOUT_MS):
-                return self._needs_human("Codigo de segundo fator recusado ou expirado")
+            aceito = False
+            for tentativa in range(1, CODIGOS_2FA + 1):
+                ultima = tentativa == CODIGOS_2FA
+                code = self.code_provider(
+                    "O PJe pediu o codigo de segundo fator, enviado ao e-mail/celular do advogado."
+                )
+                if not code:
+                    return self._needs_human("Codigo de segundo fator nao informado a tempo")
+                preenchido = self.browser.fill_checked("second_factor_input", code.strip())
+                try:
+                    self.browser.click("second_factor_submit")
+                except Exception:
+                    # A tela do 2FA pode enviar sozinha ao completar o codigo: o botao some no meio do
+                    # clique. Se o campo do codigo ja saiu da tela, o login seguiu.
+                    if self.browser.visible("second_factor_input", 1000) and ultima:
+                        raise
+                if isinstance(self.browser, SimulatedBrowser):
+                    self.browser.human_completed_second_factor()
+                if self.browser.wait_hidden("second_factor_input",
+                                            LOGIN_TIMEOUT_MS if ultima else ESPERA_CODIGO_2FA_MS):
+                    aceito = True
+                    break
+                if not ultima:
+                    # a tela continua pedindo o codigo: tenta de novo com um codigo novo
+                    self.audit.record("second_factor_retry", self.state.value,
+                                      {"tentativa": tentativa, "campo_preenchido": preenchido})
+            if not aceito:
+                return self._needs_human(
+                    f"Codigo de segundo fator recusado ou expirado ({CODIGOS_2FA} tentativas, cada uma com um codigo novo)")
             self.audit.record("second_factor_accepted", self.state.value)
             if blocked := self._post_login_blocked():
                 return self._blocked(blocked)

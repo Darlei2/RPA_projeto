@@ -69,6 +69,12 @@ class BrowserPort(ABC):
     @abstractmethod
     def close(self) -> None: ...
 
+    def fill_checked(self, group: str, value: str) -> bool:
+        """Preenche e confere que o valor ficou no campo. Devolve False se o campo continuou
+        diferente do que foi digitado (ex.: a tela redesenhou o campo no meio do preenchimento)."""
+        self.fill(group, value)
+        return True
+
     def reset_session(self) -> None:
         """Sai do PJe: descarta cookies/sessao do navegador (equivale a deslogar)."""
 
@@ -167,6 +173,23 @@ class PlaywrightBrowser(BrowserPort):
         except Exception as exc:  # noqa: BLE001
             # Nunca repassar a mensagem do Playwright: ela traz o valor digitado (ex.: a senha).
             raise BrowserError(f"Nao foi possivel preencher o campo '{group}' ({type(exc).__name__})") from None
+
+    def fill_checked(self, group: str, value: str) -> bool:
+        """Preenche, le o campo de volta e, se nao ficou com o valor, digita tecla por tecla (campos
+        com mascara ou redesenhados pela pagina). Nunca registra o valor."""
+        self.fill(group, value)
+        try:
+            locator = self._first_visible(group)
+            if locator.evaluate("e => e.tagName.toLowerCase()") not in ("input", "textarea"):
+                return True
+            if locator.input_value(timeout=2000) == value:
+                return True
+            locator.click(timeout=2000)
+            locator.fill("", timeout=2000)
+            locator.press_sequentially(value, delay=80, timeout=5000)
+            return locator.input_value(timeout=2000) == value
+        except Exception:  # noqa: BLE001 - quem decide se o login seguiu e a espera da tela
+            return False
 
     def read(self, group: str) -> str:
         try:
