@@ -106,6 +106,9 @@ class Opcoes:
     assistido: bool | None = None   # duvida no formulario: pausar para o operador (None = perguntar no inicio)
     perguntar_2fa: bool = True      # sem chave 2FA na planilha: perguntar ao operador
     chave_na_planilha: bool = True  # a chave 2FA acompanha a credencial na entrega
+    # A credencial e o certificado A1 + a chave 2FA (login pelo certificado): o robo faz so o cadastro
+    # e nao cria nem altera senha nenhuma. O login com o certificado no cadastro e o teste da credencial.
+    credencial_por_certificado: bool = False
 
 
 @dataclass
@@ -296,10 +299,10 @@ def processar_advogado(config: AppConfig, linha, audit_root: Path, deps: Depende
     nome_grupo = graus.grupo(config.base_url)
     feitos = deps.cache.setdefault(linha.numero_linha, {}).setdefault("graus", {})
     anterior = feitos.get(nome_grupo) if nome_grupo else None
-    if anterior is not None and not anterior["senha"]:
+    if anterior is not None and not anterior.get("pronto", bool(anterior["senha"])):
         cabecalho()
-        motivo = (f"{anterior['tribunal']} ficou sem credencial pronta nesta execucao; os dois graus do "
-                  f"{nome_grupo} precisam da mesma senha. Rode de novo para refazer os dois.")
+        motivo = (f"{anterior['tribunal']} ficou sem credencial pronta nesta execucao; a credencial do "
+                  f"{nome_grupo} vale para os dois graus. Rode de novo para refazer os dois.")
         deps.log("PULADO: " + motivo)
         return ResultadoAdvogado(linha.numero_linha, linha.nome, "PULADO", motivo)
 
@@ -331,7 +334,7 @@ def processar_advogado(config: AppConfig, linha, audit_root: Path, deps: Depende
         return res
     senha = res.credencial.senha if res.login_ok else ""
     if anterior is None:
-        feitos[nome_grupo] = {"tribunal": config.tribunal, "senha": senha}
+        feitos[nome_grupo] = {"tribunal": config.tribunal, "senha": senha, "pronto": res.login_ok}
     elif senha and senha != anterior["senha"]:
         aviso = f"senha DIFERENTE da do {anterior['tribunal']}: a credencial unica do {nome_grupo} nao vale"
         res.credencial.observacao = (res.credencial.observacao + " | " if res.credencial.observacao else "") + aviso
@@ -400,7 +403,7 @@ def _processar_um(config: AppConfig, linha, audit_root: Path, deps: Dependencias
     # 1) Cadastro com o certificado
     deps.log("1/2 Cadastro com o certificado A1" + (" (instalado no Windows)" if linha.usa_windows else " (.pfx)"))
     kwargs = {"rehearsal": rehearsal, "notify": deps.log, "thumbprint": linha.thumbprint}
-    if not rehearsal and not deps.opcoes.senha_via_email:
+    if not rehearsal and not deps.opcoes.senha_via_email and not deps.opcoes.credencial_por_certificado:
         # Senha pelo login unico (PDPJ), sem e-mail, na mesma sessao do certificado; se o tribunal
         # nao oferecer, o robo cai no caminho do e-mail ("Esqueci minha senha").
         # Com a opcao senha_via_email, pula o login unico e vai direto pelo e-mail (IMAP da planilha).
@@ -418,6 +421,9 @@ def _processar_um(config: AppConfig, linha, audit_root: Path, deps: Dependencias
     res.cadastro, res.motivo = resultado.status, resultado.reason
     deps.log(f"Cadastro: {resultado.status} - {resultado.reason}")
     _mostrar_diagnostico(audit_root, resultado, deps.log)
+
+    if deps.opcoes.credencial_por_certificado and not rehearsal:
+        return _credencial_por_certificado(config, record, deps, res, resultado.status, secret_2fa)
 
     pode_senha = resultado.status == "COMPLETED" or (
         resultado.status == "ALREADY_REGISTERED" and nova_senha_se_ja_cadastrado)
@@ -451,6 +457,24 @@ def _processar_um(config: AppConfig, linha, audit_root: Path, deps: Dependencias
         return res
     deps.log("  tentando pelo e-mail")
     return _etapa_senha(config, linha, audit_root, deps, res, cache, secret_2fa, senha_do_outro_grau)
+
+
+def _credencial_por_certificado(config, record, deps: Dependencias, res, status: str, secret_2fa: str):
+    """A credencial e o certificado A1 + a chave 2FA. O cadastro so termina (COMPLETED) ou so reconhece
+    quem ja era cadastrado (ALREADY_REGISTERED) depois de entrar com o certificado e o codigo 2FA: esse
+    login e o teste da credencial. Nenhuma senha e criada nem alterada."""
+    if status not in ("COMPLETED", "ALREADY_REGISTERED"):
+        return res
+    if not secret_2fa:
+        res.motivo += " | sem a chave 2FA do advogado: a credencial por certificado precisa dela"
+        deps.log("2/2 Credencial: sem a chave 2FA (Secret Key), a credencial por certificado nao pode ser criada.")
+        return res
+    deps.log("2/2 Credencial: certificado A1 + 2FA (sem senha). O login com o certificado funcionou.")
+    res.credencial = LinhaCredencial(
+        config.tribunal, config.base_url, record.nome_esperado, record.cpf_esperado, record.email,
+        chave_2fa=secret_2fa if deps.opcoes.chave_na_planilha else "", login_testado=True,
+        por_certificado=True, observacao="login com certificado A1 + 2FA (sem senha)")
+    return res
 
 
 def _etapa_senha(config, linha, audit_root: Path, deps: Dependencias, res, cache: dict, secret_2fa: str,
@@ -638,10 +662,13 @@ def _resumo(resultados: list[ResultadoAdvogado], config: AppConfig, rehearsal: b
         cred = "-"
         if r.credencial:
             c = r.credencial
-            cred = ("senha OK" if c.senha_cadastrada else "senha NAO cadastrada") + \
-                   (", login CPF+senha+2FA OK" if c.login_testado else ", login nao testado/falhou")
-            if c.observacao:
-                cred += f" ({c.observacao})"
+            if c.por_certificado:
+                cred = "certificado A1 + 2FA, login OK" if c.login_testado else "certificado A1 + 2FA, login falhou"
+            else:
+                cred = ("senha OK" if c.senha_cadastrada else "senha NAO cadastrada") + \
+                       (", login CPF+senha+2FA OK" if c.login_testado else ", login nao testado/falhou")
+                if c.observacao:
+                    cred += f" ({c.observacao})"
         log(f"  linha {r.linha} | {r.nome} | cadastro: {r.cadastro} | credencial: {cred}")
         if r.motivo and r.cadastro not in ("COMPLETED",):
             log(f"      motivo: {r.motivo}")
@@ -785,6 +812,9 @@ def _confirmar(configs: list[AppConfig], validas: list, ensaio: bool, deps: Depe
     nova_senha = False
     if opcoes.so_senha:
         nova_senha = True
+    elif not ensaio and opcoes.credencial_por_certificado:
+        log("Credencial por certificado A1 + 2FA: nenhuma senha e criada nem alterada, e o e-mail nao e usado.")
+        log("Abra o PJeOffice PRO antes de continuar (ele assina o login e o termo).")
     elif not ensaio:
         if opcoes.senha_via_email:
             # Rota de credencial pelo e-mail: um advogado ja cadastrado sempre precisa de senha nova
@@ -798,6 +828,7 @@ def _confirmar(configs: list[AppConfig], validas: list, ensaio: bool, deps: Depe
     nomes = ", ".join(c.tribunal for c in configs)
     acao = ("ENSAIO" if ensaio else "NOVA SENHA (sem cadastro)" if opcoes.so_senha
             else "CONFERENCIA DA CREDENCIAL EXISTENTE (so completa o que falta)" if deps.senha_existente
+            else "CADASTRO REAL (credencial por certificado, sem senha)" if opcoes.credencial_por_certificado
             else "CADASTRO REAL")
     if deps.participa:
         log("Pelo pedido, entram em cada tribunal:")
@@ -821,6 +852,9 @@ def run_executar(audit_root: Path = Path("runtime/audit"), saida: Path = Path("e
     log = deps.log
     if so_senha:
         deps.opcoes.so_senha = True
+    if deps.opcoes.so_senha and deps.opcoes.credencial_por_certificado:
+        log("A credencial por certificado nao tem senha: nao combina com a opcao so senha. Nada foi executado.")
+        return 2
     if deps.opcoes.so_senha:
         # Advogado ja cadastrado nesses tribunais: nao entra com o certificado (evita bloqueio por
         # excesso de logins) e vai direto para nova senha + teste de login (+ entrega).

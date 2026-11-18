@@ -31,6 +31,7 @@ class LinhaCredencial:
     login_testado: bool = False
     quando: datetime = field(default_factory=datetime.now)
     observacao: str = ""
+    por_certificado: bool = False  # a credencial e o certificado A1 + a chave 2FA: nao tem senha
 
     def valores(self) -> list:
         return [

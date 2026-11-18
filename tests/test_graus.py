@@ -153,7 +153,7 @@ def test_primeiro_grau_sem_credencial_nao_faz_o_segundo(tmp_path):
     assert [t for t, _, _ in fake.pedidos] == ["TRT5 - 1o grau"] * 2      # nada foi pedido ao 2o grau
     assert [t for t, _ in fake.cadastros] == ["TRT5 - 1o grau"] * 2       # nem login com certificado
     assert [r.cadastro for r in por["TRT5 - 2o grau"]] == ["PULADO", "PULADO"]
-    assert "os dois graus do TRT5 precisam da mesma senha" in por["TRT5 - 2o grau"][0].motivo
+    assert "a credencial do TRT5 vale para os dois graus" in por["TRT5 - 2o grau"][0].motivo
 
 
 def test_erro_inesperado_no_primeiro_grau_tambem_segura_o_segundo(tmp_path):
@@ -488,3 +488,86 @@ def test_falha_no_relatorio_nao_esconde_o_resultado(tmp_path, monkeypatch):
     deps.relatar = lambda por_tribunal: 1 / 0
     assert run_executar(tmp_path / "audit", tmp_path / "out", tribunal="tjap", ensaio=False, deps=deps) == 0
     assert "(nao consegui gerar o relatorio: ZeroDivisionError)" in fake.log
+
+
+# ------------------------------------------------- credencial por certificado (sem senha)
+CHAVE_2FA = "JBSWY3DPEHPK3PXP"
+
+
+def _planilha_com_chave(pasta: Path, chave=CHAVE_2FA) -> Path:
+    from openpyxl import load_workbook
+
+    caminho = _planilha(pasta)
+    wb = load_workbook(caminho)
+    ws = wb.active
+    ws.cell(row=1, column=len(CABECALHO) + 1, value="chave_2fa")
+    ws.cell(row=2, column=len(CABECALHO) + 1, value=chave)
+    wb.save(caminho)
+    return caminho
+
+
+def _por_certificado(fake, status_por_tribunal=None):
+    """deps do Fake no modo credencial por certificado; o cadastro devolve o status dado por tribunal."""
+    deps = fake.deps()
+    deps.opcoes = lote.Opcoes(perguntar_2fa=False, credencial_por_certificado=True)
+    chamadas = []
+
+    def cadastrar(config, record, pfx, pwd, code_provider, audit_root, **kw):
+        chamadas.append((config.tribunal, sorted(k for k in kw if k.startswith("senha"))))
+        return ResultadoCadastro((status_por_tribunal or {}).get(config.tribunal, "COMPLETED"), "ok", "run")
+
+    deps.cadastrar = cadastrar
+    return deps, chamadas
+
+
+def test_credencial_por_certificado_faz_so_o_cadastro_nos_dois_graus(tmp_path):
+    """Tipo certificado A1 + 2FA: nenhuma senha e criada, o e-mail nao e usado e o login do cadastro e o teste."""
+    linhas = ler_planilha(_planilha_com_chave(tmp_path))
+    fake = Fake()
+    deps, chamadas = _por_certificado(fake, {"TRT5 - 2o grau": "ALREADY_REGISTERED"})
+    por = executar_tribunais([_cfg("trt5"), _cfg("trt5-2g")], linhas, tmp_path / "audit", tmp_path / "out", deps,
+                             rehearsal=False, nova_senha_se_ja_cadastrado=False)
+    assert chamadas == [("TRT5 - 1o grau", []), ("TRT5 - 2o grau", [])]     # cadastro sem pedir senha ao login unico
+    assert fake.pedidos == []                                               # o passo da senha (e-mail) nem roda
+    assert [(c.tribunal, c.senha, c.chave_2fa, c.por_certificado, c.login_testado, c.senha_cadastrada)
+            for c in fake.entregue] == [("TRT5 - 1o grau", "", CHAVE_2FA, True, True, False),
+                                        ("TRT5 - 2o grau", "", CHAVE_2FA, True, True, False)]
+    assert all(r.login_ok for rs in por.values() for r in rs)
+    texto = "\n".join(fake.log)
+    assert "certificado A1 + 2FA, login OK" in texto and CHAVE_2FA not in texto
+
+
+def test_credencial_por_certificado_primeiro_grau_sem_cadastro_nao_faz_o_segundo(tmp_path):
+    linhas = ler_planilha(_planilha_com_chave(tmp_path))
+    fake = Fake()
+    deps, chamadas = _por_certificado(fake, {"TRT5 - 1o grau": "FAILED"})
+    por = executar_tribunais([_cfg("trt5"), _cfg("trt5-2g")], linhas, tmp_path / "audit", tmp_path / "out", deps,
+                             rehearsal=False, nova_senha_se_ja_cadastrado=False)
+    assert [t for t, _ in chamadas] == ["TRT5 - 1o grau"] and fake.entregue is None
+    assert por["TRT5 - 2o grau"][0].cadastro == "PULADO"
+    assert "a credencial do TRT5 vale para os dois graus" in por["TRT5 - 2o grau"][0].motivo
+
+
+def test_credencial_por_certificado_sem_chave_2fa_nao_fica_pronta(tmp_path):
+    linhas = ler_planilha(_planilha(tmp_path))        # planilha sem a chave 2FA
+    fake = Fake()
+    deps, _ = _por_certificado(fake)
+    por = executar_tribunais([_cfg("tjap")], linhas, tmp_path / "audit", tmp_path / "out", deps,
+                             rehearsal=False, nova_senha_se_ja_cadastrado=False)
+    resultado = por["TJAP - 1o grau"][0]
+    assert resultado.credencial is None and "sem a chave 2FA" in resultado.motivo and fake.entregue is None
+
+
+def test_credencial_por_certificado_nao_combina_com_so_senha(tmp_path, monkeypatch):
+    trib = _tribunais_de_teste(tmp_path, {"tjap"})
+    original = lote.listar_tribunais
+    monkeypatch.setattr(lote, "listar_tribunais", lambda pasta=trib: original(trib))
+    fake = Fake(respostas=[str(_planilha_com_chave(tmp_path))])
+    deps, chamadas = _por_certificado(fake)
+    deps.opcoes.so_senha = True
+    assert run_executar(tmp_path / "audit", tmp_path / "out", tribunal="tjap", ensaio=False, deps=deps) == 2
+    assert chamadas == []
+    deps.opcoes.so_senha = False
+    assert run_executar(tmp_path / "audit", tmp_path / "out", tribunal="tjap", ensaio=False, deps=deps) == 0
+    assert "CADASTRO REAL (credencial por certificado, sem senha)" not in "\n".join(fake.log)  # a pergunta vai ao operador
+    assert "nenhuma senha e criada nem alterada" in "\n".join(fake.log)
