@@ -56,6 +56,18 @@ def test_le_xlsx_com_nomes_de_coluna_variados(pasta):
     assert l.segredo("senha_certificado") == ""
 
 
+def test_numero_da_linha_e_o_da_planilha_mesmo_com_linhas_em_branco(pasta):
+    """Linha em branco no meio (ou linha com executar = N) nao muda o numero das linhas seguintes."""
+    vazia = [""] * len(CABECALHO)
+    path = _xlsx(pasta / "a.xlsx", [_linha(), vazia, vazia, _linha(nome="OUTRA PESSOA", executar="N"),
+                                    _linha(nome="TERCEIRA PESSOA")])
+    assert [(l.numero_linha, l.nome) for l in ler_planilha(path)] == [(2, "ADVOGADA DE TESTE"), (6, "TERCEIRA PESSOA")]
+    csv = pasta / "a.csv"
+    csv.write_text(";".join(CABECALHO) + "\n" + ";".join(_linha()) + "\n\n" + ";".join(_linha(nome="OUTRA PESSOA")) + "\n",
+                   encoding="utf-8-sig")
+    assert [l.numero_linha for l in ler_planilha(csv)] == [2, 4]
+
+
 def test_excel_numerico_nao_perde_zeros(pasta):
     path = _xlsx(pasta / "a.xlsx", [_linha(cpf="01234567890", cep="01001000")], numeric_cpf=True)
     l = ler_planilha(path)[0]

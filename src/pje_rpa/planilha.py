@@ -140,17 +140,19 @@ def ler_planilha(path: Path, password_provider=lambda: "") -> list[LinhaAdvogado
         rows = _rows_csv(path)
     else:
         raise ConfigurationError("Use uma planilha .xlsx ou .csv")
-    rows = [r for r in rows if any(c for c in r)]
-    if not rows:
+    # (numero da linha no arquivo, celulas): linha em branco no meio nao muda o numero das seguintes,
+    # para "linha 45" ser a linha 45 que o operador ve no Excel.
+    numeradas = [(n, r) for n, r in enumerate(rows, start=1) if any(c for c in r)]
+    if not numeradas:
         raise ConfigurationError("Planilha vazia")
 
-    header = [_ALIAS.get(_norm(h), "") for h in rows[0]]
+    header = [_ALIAS.get(_norm(h), "") for h in numeradas[0][1]]
     faltando = [c for c in OBRIGATORIAS if c not in header]
     if faltando:
         raise ConfigurationError("Colunas obrigatorias ausentes: " + ", ".join(faltando))
 
     linhas = []
-    for idx, row in enumerate(rows[1:], start=2):
+    for idx, row in numeradas[1:]:
         dados = {col: (row[i] if i < len(row) else "") for i, col in enumerate(header) if col}
         if _norm(dados.get("executar", "")) in {"n", "nao", "no", "0", "false"}:
             continue
