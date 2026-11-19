@@ -397,6 +397,12 @@ NOT_ADDRESS = re.compile(
     r"nascimento|natural|profissional|trabalho|comercial|empresa|titulo de eleitor|ctps|conselho)\b"
 )
 NOT_PHONE = re.compile(r"\b(fax|recado|comercial)\b")
+# "Nome do pai", "Nome da mae", "Nome social"...: e o nome de OUTRA pessoa (ou outro nome), nao o do
+# advogado. Nao entra na conferencia de identidade nem e alterado: fica como o PJe/Receita trouxe.
+NOT_NAME = re.compile(
+    r"\b(pai|mae|genitor\w*|filiacao|conjuge|companheir\w*|social|fantasia|sociedade|escritorio|empresa|"
+    r"representante|responsavel|contato)\b"
+)
 
 
 def other_subject(key: str, field: dict[str, Any]) -> bool:
@@ -406,6 +412,8 @@ def other_subject(key: str, field: dict[str, Any]) -> bool:
         return NOT_ADDRESS.search(text) is not None
     if key in ("phone", "ddd"):
         return NOT_PHONE.search(text) is not None
+    if key == "nome":
+        return NOT_NAME.search(text) is not None
     return False
 
 

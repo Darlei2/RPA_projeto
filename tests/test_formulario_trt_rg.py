@@ -232,3 +232,35 @@ def test_identidade_que_diverge_no_formulario_continua_parando():
     """So endereco de rua e e-mail sao trocados pelo valor da planilha; o resto continua parando."""
     assert "email" in adaptive_form.PLANILHA_VENCE_KEYS
     assert not {"nome", "cpf", "oab_numero", "oab_uf", "cidade", "uf"} & set(adaptive_form.PLANILHA_VENCE_KEYS)
+
+
+# ---------------------------------------------------------------- nome do pai / da mae
+@pytest.mark.parametrize("label", ["Nome do pai", "Nome da mãe", "Nome social", "Nome do cônjuge", "Nome da sociedade"])
+def test_nome_de_outra_pessoa_nao_e_o_nome_do_advogado(label):
+    campo = {"label": label}
+    assert field_key(campo)[0] == "nome" and adaptive_form.other_subject("nome", campo)
+
+
+@pytest.mark.parametrize("label", ["Nome", "Nome completo", "Nome do advogado"])
+def test_nome_do_advogado_continua_sendo_identidade(label):
+    assert not adaptive_form.other_subject("nome", {"label": label})
+
+
+def test_nome_do_pai_ja_preenchido_pela_receita_nao_vira_divergencia_de_identidade(pagina):
+    """TRT5 2o grau: a Receita traz o nome do pai num campo editavel. Nao e o nome do advogado: o
+    cadastro segue e o campo fica como veio."""
+    page = pagina(_form(depois_de_enviar=True).replace("<input id=pai>", '<input id=pai value="JOSE DE TESTE FILHO">'))
+    report = adaptive_form.operate(page, COM_RG)
+    assert not report["blocked"] and report["pending"] == [], report
+    assert "nome" in report["verified"] and "nome: Nome do pai" in report["other_subject"]
+    assert page.input_value("#pai") == "JOSE DE TESTE FILHO"
+    assert page.input_value("#rg") == "12.345.678-9"
+
+
+def test_nome_do_advogado_diferente_continua_bloqueando_mesmo_com_nome_do_pai(pagina):
+    """A protecao de identidade nao muda: o nome exibido pelo PJe tem de ser o do advogado da planilha."""
+    html = _form(depois_de_enviar=True).replace("ADVOGADO DE TESTE", "OUTRA PESSOA QUALQUER")
+    page = pagina(html.replace("<input id=pai>", '<input id=pai value="ADVOGADO DE TESTE">'))
+    report = adaptive_form.operate(page, COM_RG)
+    assert "identidade_divergente:nome" in report["blocked"]
+    assert page.input_value("#rg") == ""          # nada e preenchido quando a identidade diverge
