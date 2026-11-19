@@ -29,6 +29,9 @@ def test_cada_endereco_e_cada_nome_de_tribunal_aparecem_uma_vez():
 # PJe dos TJs em que cada grau tem endereco, cadastro e credencial proprios (dominios <TJ>-PJE-1G/2G).
 SEGUNDO_GRAU_DOS_TJS = {
     "tjap-2g": ("tjap", "https://pje.tjap.jus.br/2g/login.seam"),
+    "tjba-2g": ("tjba", "https://pje2g.tjba.jus.br/pje/login.seam"),
+    "tjmg-2g": ("tjmg", "https://pjerecursal.tjmg.jus.br/pje/login.seam"),
+    "tjmt-2g": ("tjmt", "https://pje2.tjmt.jus.br/pje2/login.seam"),
     "tjce-2g": ("tjce", "https://pje.tjce.jus.br/pje2grau/login.seam"),
     "tjdft-2g": ("tjdft", "https://pje2i.tjdft.jus.br/pje/login.seam"),
     "tjes-2g": ("tjes", "https://pje.tjes.jus.br/pje2g/login.seam"),
@@ -61,6 +64,35 @@ def test_tribunais_novos_sem_primeiro_grau_no_robo():
                                       ("tse", "TSE", "https://pje.tse.jus.br/pje/login.seam")):
         config = load_config(PROJECT / "tribunais" / f"{chave}.toml")
         assert (config.tribunal, config.base_url) == (tribunal, endereco)
+
+
+UFS = "AC AL AM AP BA CE DF ES GO MA MG MS MT PA PB PE PI PR RJ RN RO RR RS SC SE SP TO".split()
+
+
+@pytest.mark.parametrize("uf", UFS)
+def test_cada_tre_tem_os_dois_graus(uf):
+    """TREs (planilha "Testagem e Cadastro em Tribunais"): 1o grau no servidor do TSE, 2o grau no do TRE."""
+    from pje_rpa import exigencias, graus
+
+    primeiro = load_config(PROJECT / "tribunais" / f"tre{uf.lower()}.toml")
+    segundo = load_config(PROJECT / "tribunais" / f"tre{uf.lower()}-2g.toml")
+    assert primeiro.base_url == f"https://pje1g-{uf.lower()}.tse.jus.br/pje/login.seam"
+    assert segundo.base_url == f"https://pje.tre-{uf.lower()}.jus.br/pje/login.seam"
+    assert (primeiro.tribunal, segundo.tribunal) == (f"TRE-{uf} - 1o grau", f"TRE-{uf} - 2o grau")
+    assert segundo.selectors == primeiro.selectors
+    # cada grau tem cadastro e credencial proprios; a exigencia fixa de telefone/RG e so dos TRTs
+    assert graus.grupo(segundo.base_url) == "" and exigencias.faltando(segundo.base_url, object()) == []
+
+
+def test_pje_da_planilha_que_faltavam_no_robo():
+    for chave, tribunal, endereco in (("tjmt", "TJMT - 1o grau", "https://pje.tjmt.jus.br/pje/login.seam"),
+                                      ("tjpi", "TJPI - 1o grau", "https://pje.tjpi.jus.br/1g/login.seam"),
+                                      ("cnj", "CNJ", "https://www.cnj.jus.br/pjecnj/login.seam"),
+                                      ("tst", "TST", "https://pje.tst.jus.br/tst/login.seam"),
+                                      ("trf5", "TRF5 - PJe", "https://pje.trf5.jus.br/pje/login.seam")):
+        config = load_config(PROJECT / "tribunais" / f"{chave}.toml")
+        assert (config.tribunal, config.base_url) == (tribunal, endereco)
+    assert len(TRIBUNAIS) == 144  # todos os dominios PJe da planilha tem arquivo
 
 
 def test_heranca_sobrescreve_so_o_declarado(tmp_path):

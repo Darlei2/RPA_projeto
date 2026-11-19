@@ -1,0 +1,12 @@
+herda = "_comum.toml"
+
+# URL da planilha "Testagem e Cadastro em Tribunais" (aba Cadastros, dominio TRF5-PJE-1G).
+# A planilha chama de TRF5-PJE-1G, com a instancia em branco; o endereco e o PJe do proprio TRF5
+# (o 1o grau da JF fica em pje1g.trf5). Confirme o grau no sondar antes de usar.
+# Confirme com scripts\sondar.ps1 -Tribunal trf5
+# Libere o envio real (true/true) so depois de sondar + ensaio OK neste tribunal.
+[app]
+tribunal = "TRF5 - PJe"
+base_url = "https://pje.trf5.jus.br/pje/login.seam"
+selectors_approved = false
+allow_live_submission = false

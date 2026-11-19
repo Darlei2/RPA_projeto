@@ -1,0 +1,10 @@
+herda = "_comum.toml"
+
+# URL da planilha "Testagem e Cadastro em Tribunais" (aba Cadastros, dominio TJPI-PJE-1G).
+# Confirme com scripts\sondar.ps1 -Tribunal tjpi
+# Libere o envio real (true/true) so depois de sondar + ensaio OK neste tribunal.
+[app]
+tribunal = "TJPI - 1o grau"
+base_url = "https://pje.tjpi.jus.br/1g/login.seam"
+selectors_approved = false
+allow_live_submission = false

@@ -1,0 +1,11 @@
+herda = "_comum.toml"
+
+# URL da planilha "Testagem e Cadastro em Tribunais" (aba Cadastros, dominio TRERO-PJE-1G).
+# PJe das zonas eleitorais (1o grau), no servidor do TSE; login pelo SSO Jus.br.
+# Confirme com scripts\sondar.ps1 -Tribunal trero
+# Libere o envio real (true/true) so depois de sondar + ensaio OK neste tribunal.
+[app]
+tribunal = "TRE-RO - 1o grau"
+base_url = "https://pje1g-ro.tse.jus.br/pje/login.seam"
+selectors_approved = false
+allow_live_submission = false

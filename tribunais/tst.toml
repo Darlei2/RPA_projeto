@@ -1,0 +1,11 @@
+herda = "_comum.toml"
+
+# URL da planilha "Testagem e Cadastro em Tribunais" (aba Cadastros, dominio TST-PJE-2G).
+# PJe do TST (TST-PJE-2G no Keymaker).
+# Confirme com scripts\sondar.ps1 -Tribunal tst
+# Libere o envio real (true/true) so depois de sondar + ensaio OK neste tribunal.
+[app]
+tribunal = "TST"
+base_url = "https://pje.tst.jus.br/tst/login.seam"
+selectors_approved = false
+allow_live_submission = false

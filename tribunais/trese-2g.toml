@@ -1,0 +1,12 @@
+herda = "trese.toml"
+
+# URL da planilha "Testagem e Cadastro em Tribunais" (aba Cadastros, dominio TRESE-PJE-2G).
+# PJe do 2o grau, no servidor do proprio TRE (o 1o grau fica no servidor do TSE).
+# Herda do 1o grau: mesmos seletores, so muda o endereco. Cada grau tem cadastro e credencial proprios.
+# Confirme com scripts\sondar.ps1 -Tribunal trese-2g
+# Libere o envio real (true/true) so depois de sondar + ensaio OK neste tribunal.
+[app]
+tribunal = "TRE-SE - 2o grau"
+base_url = "https://pje.tre-se.jus.br/pje/login.seam"
+selectors_approved = false
+allow_live_submission = false

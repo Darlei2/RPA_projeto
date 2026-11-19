@@ -1,0 +1,12 @@
+herda = "tjmt.toml"
+
+# URL da planilha "Testagem e Cadastro em Tribunais" (aba Cadastros, dominio TJMT-PJE-2G).
+# Herda do 1o grau: mesmos seletores, so muda o endereco. Cada grau tem cadastro, senha e
+# credencial proprios (a regra de uma credencial para os dois graus vale so para os TRTs).
+# Confirme com scripts\sondar.ps1 -Tribunal tjmt-2g
+# Libere o envio real (true/true) so depois de sondar + ensaio OK neste tribunal.
+[app]
+tribunal = "TJMT - 2o grau"
+base_url = "https://pje2.tjmt.jus.br/pje2/login.seam"
+selectors_approved = false
+allow_live_submission = false
