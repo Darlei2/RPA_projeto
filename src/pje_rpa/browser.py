@@ -82,6 +82,11 @@ class BrowserPort(ABC):
         """Estrutura visivel da tela atual, sem valores de campos (para homologacao)."""
         return {}
 
+    def error_line(self, markers: list[str]) -> str:
+        """A linha do texto da tela que contem um dos marcadores: a mensagem que o sistema exibiu
+        (ex.: "Nao foi possivel realizar a autenticacao: ..."). '' = nenhuma. Compara sem acento."""
+        return ""
+
 
 class PlaywrightBrowser(BrowserPort):
     """Adaptador web. Nao tenta controlar janelas nativas do certificado."""
@@ -214,6 +219,17 @@ class PlaywrightBrowser(BrowserPort):
             return None
         return next((marker for marker in markers if marker.casefold() in body), None)
 
+    def error_line(self, markers: list[str]) -> str:
+        try:
+            body = self.page.locator("body").inner_text(timeout=1500)
+        except Exception:
+            return ""
+        wanted = [_plain(marker) for marker in markers]
+        for line in body.splitlines():
+            if any(marker in _plain(line) for marker in wanted):
+                return " ".join(line.split())[:300]
+        return ""
+
     def close(self) -> None:
         errors = []
         for name, action in (
@@ -291,6 +307,13 @@ class PlaywrightBrowser(BrowserPort):
         raise BrowserError(f"Prefixo de seletor invalido: {spec}")
 
 
+def _plain(text: str) -> str:
+    import unicodedata
+
+    normalized = unicodedata.normalize("NFKD", text or "")
+    return "".join(ch for ch in normalized if not unicodedata.combining(ch)).casefold()
+
+
 class SimulatedBrowser(BrowserPort):
     def __init__(self, record: LawyerRecord, scenario: str = "success") -> None:
         self.record = record
@@ -346,7 +369,7 @@ class SimulatedBrowser(BrowserPort):
         if self.stage == "post_auth":
             if self.scenario == "second_factor":
                 self.stage = "second_factor"
-            elif self.scenario in {"already_registered", "captcha", "jus_postulandi"}:
+            elif self.scenario in {"already_registered", "captcha", "jus_postulandi", "inactive_user"}:
                 return
             else:
                 self.stage = "registration"
@@ -377,6 +400,11 @@ class SimulatedBrowser(BrowserPort):
         if self.scenario == "jus_postulandi" and self.stage == "post_auth":
             return next((m for m in markers if "jus postulandi" in m.casefold()), None)
         return None
+
+    def error_line(self, markers: list[str]) -> str:
+        if self.scenario == "inactive_user" and self.stage == "post_auth":
+            return "N\u00e3o foi poss\u00edvel realizar a autentica\u00e7\u00e3o: O usu\u00e1rio 529.982.247-25 n\u00e3o est\u00e1 ativo."
+        return ""
 
     def close(self) -> None:
         self.stage = "closed"

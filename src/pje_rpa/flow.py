@@ -16,6 +16,8 @@ LOGIN_TIMEOUT_MS = 90_000
 # Codigo de segundo fator: se a tela continua pedindo o codigo, o robo tenta de novo com um codigo
 # NOVO (o campo pode ter ficado em branco, ou o codigo virou no meio do envio). Poucas tentativas de
 # proposito: codigo errado repetido pode bloquear o usuario no login unico.
+# Texto com que o PJe recusa o login depois do certificado/2FA; o motivo vem na mesma linha.
+RECUSA_DE_AUTENTICACAO = ("nao foi possivel realizar a autenticacao",)
 CODIGOS_2FA = 2
 ESPERA_CODIGO_2FA_MS = 25_000
 
@@ -151,6 +153,11 @@ class PJeRegistrationFlow:
             nota = self._garantir_email_cadastral()
             return self._result(RunStatus.ALREADY_REGISTERED, "Advogado ja cadastrado neste PJe" + nota)
 
+        # O PJe pode devolver para a tela de login dizendo por que recusou (ex.: usuario inativo):
+        # o motivo vai para o resultado, sem precisar abrir o print.
+        if recusa := self._recusa_do_pje():
+            return self._failed(recusa)
+
         if not self.browser.visible("registration_form", 10000):
             # Execucao anterior ja enviou o formulario e parou no termo: retoma dali.
             if self.browser.visible("commitment_term", 3000):
@@ -162,6 +169,8 @@ class PJeRegistrationFlow:
                         "Ensaio: o PJe ja esta no termo de compromisso; nada foi assinado",
                     )
                 return self._sign_commitment()
+            if recusa := self._recusa_do_pje():  # a mensagem pode aparecer depois da espera
+                return self._failed(recusa)
             return self._failed("Formulario de cadastro nao localizado apos autenticacao")
         self._transition(FlowState.REGISTRATION_FORM, "registration_form_detected")
         if hasattr(self.browser, "page"):
@@ -427,6 +436,21 @@ class PJeRegistrationFlow:
         if on_panel:
             self.audit.record("existing_panel_seen", self.state.value)
         return self._blocked_reason(skip=("jus_postulandi",) if on_panel else ())
+
+    def _recusa_do_pje(self) -> str | None:
+        """Mensagem do PJe recusando a autenticacao ("Nao foi possivel realizar a autenticacao: ...").
+        O motivo vai para o resultado sem CPF nem nome; o texto exibido fica na auditoria, mascarado."""
+        try:
+            linha = self.browser.error_line(list(RECUSA_DE_AUTENTICACAO))
+        except Exception:  # noqa: BLE001
+            return None
+        if not linha:
+            return None
+        self.audit.record("pje_refused_authentication", self.state.value, {"mensagem": self._scrub(linha)})
+        if "NAO ESTA ATIVO" in _normalize_name(linha):
+            return "O PJe recusou a autenticacao: o usuario nao esta ativo neste tribunal"
+        detalhe = self._scrub(linha.split(":", 1)[1] if ":" in linha else "").strip(" .").lower()
+        return "O PJe recusou a autenticacao" + (f": {detalhe[:160]}" if detalhe else "")
 
     def _blocked_reason(self, skip: tuple[str, ...] = ()) -> str | None:
         labels = {

@@ -77,6 +77,29 @@ class CoreTests(unittest.TestCase):
             self.assertEqual(result.status, RunStatus.BLOCKED)
             self.assertIn("Jus Postulandi", result.reason)
 
+    def test_usuario_inativo_no_tribunal_vira_motivo_sem_cpf(self) -> None:
+        """O PJe volta para a tela de login com "O usuario <CPF> nao esta ativo": o motivo sai no
+        resultado (sem CPF) e a mensagem exibida fica na auditoria, mascarada."""
+        with tempfile.TemporaryDirectory() as temp:
+            audit = AuditLog(Path(temp))
+            browser = SimulatedBrowser(self.record, "inactive_user")
+            result = _flow(self.config, self.record, browser, audit).run()
+            self.assertEqual(result.status, RunStatus.FAILED)
+            self.assertEqual(result.reason, "O PJe recusou a autenticacao: o usuario nao esta ativo neste tribunal")
+            registro = audit.path.read_text(encoding="utf-8")
+            self.assertIn("pje_refused_authentication", registro)
+            self.assertNotIn("529.982.247-25", registro)
+            self.assertNotIn(self.record.cpf_esperado, registro)
+
+    def test_outra_recusa_do_pje_traz_o_texto_mascarado(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            audit = AuditLog(Path(temp))
+            browser = SimulatedBrowser(self.record, "inactive_user")
+            browser.error_line = lambda markers: "N\u00e3o foi poss\u00edvel realizar a autentica\u00e7\u00e3o: Perfil 529.982.247-25 sem permiss\u00e3o."
+            result = _flow(self.config, self.record, browser, audit).run()
+            self.assertEqual(result.status, RunStatus.FAILED)
+            self.assertEqual(result.reason, "O PJe recusou a autenticacao: perfil *** sem permissao")
+
     def test_audit_tampering_is_detected(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
             audit = AuditLog(Path(temp))
