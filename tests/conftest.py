@@ -43,3 +43,14 @@ def pytest_collection_modifyitems(config, items):
         pular = pytest.mark.skip(reason="Chromium do Playwright nao instalado (python -m playwright install chromium)")
         for item in alvo:
             item.add_marker(pular)
+
+
+@pytest.fixture(autouse=True)
+def _sem_tabela_do_mapeamento(monkeypatch, tmp_path_factory):
+    """A tabela real do mapeamento (tribunais\\formularios.csv) muda a cada mapeamento: os testes
+    usam uma tabela vazia, e os que testam a tabela passam a propria."""
+    from pje_rpa import mapeamento
+
+    pasta = tmp_path_factory.mktemp("mapa")
+    monkeypatch.setattr(mapeamento, "TABELA", pasta / "formularios.csv")
+    monkeypatch.setattr(mapeamento, "SITUACAO", pasta / "formularios-situacao.csv")

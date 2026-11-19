@@ -65,6 +65,13 @@ def build_parser() -> argparse.ArgumentParser:
     run.add_argument("--audit-root", type=Path, default=Path("runtime/audit"))
     run.add_argument("--saida", type=Path, default=Path("entregas"))
 
+    mapa = sub.add_parser("mapear", help="Le o formulario de cadastro de cada PJe (campos e obrigatorios) sem preencher nada")
+    mapa.add_argument("--tribunal", default="", help="trt, trf, tj, tre, todos ou chaves (ex.: tjmt,tjmt-2g)")
+    mapa.add_argument("--planilha", default="", help="Planilha com o advogado cujo certificado sera usado")
+    mapa.add_argument("--linha", type=int, default=0, help="Linha do advogado na planilha (se houver mais de um)")
+    mapa.add_argument("--pausa", type=float, default=5.0, help="Segundos entre um tribunal e outro")
+    mapa.add_argument("--audit-root", type=Path, default=Path("runtime/audit"))
+
     report = sub.add_parser("relatorio", help="Resume os resultados por tribunal e confere a meta de validacao")
     report.add_argument("--audit-root", type=Path, default=Path("runtime/audit"))
     report.add_argument("--meta", type=int, default=5, help="Minimo de tribunais com cadastro real")
@@ -120,6 +127,9 @@ def main(argv: list[str] | None = None) -> int:
             ensaio = True if args.ensaio else (False if args.real else None)
             return run_executar(args.audit_root, args.saida, args.tribunal, args.planilha, ensaio,
                                 so_senha=args.so_senha)
+        if args.command == "mapear":
+            from .mapeamento import run_mapear
+            return run_mapear(args.tribunal, args.planilha, args.linha, args.pausa, args.audit_root)
         if args.command == "relatorio":
             from .tribunais import format_relatorio, relatorio
             data = relatorio(args.audit_root, args.meta)

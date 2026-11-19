@@ -246,3 +246,30 @@ formulario ja estiver certo. Divergencia de identidade (nome, CPF, OAB) nunca pa
 
 **Campo fixado**: se um tribunal sempre gerar a mesma duvida, fixe o campo no .toml dele, por exemplo
 `campo_uf = ["id=formEndereco:uf"]` dentro de `[selectors]` (veja o comentario em `_comum.toml`).
+
+## 9. Mapa dos formularios (campos e obrigatorios de cada PJe)
+
+Com o certificado de UM advogado (com autorizacao), o robo entra em cada PJe, le o formulario de
+cadastro e SAI: nao preenche, nao clica em "Confirmar dados" e nao assina nada. Onde o advogado ja e
+cadastrado, o formulario de cadastro nao aparece; o robo le entao "Alteracao de dados cadastrais"
+(so le, nao salva).
+
+```powershell
+.\scripts\sondar.ps1 -Tribunal treba,treba-2g        # antes, sem certificado: o login abre?
+.\scripts\mapear.ps1 -Tribunal tre -Linha 2           # familia: trt, trf, tj, tre ou todos
+.\scripts\mapear.ps1 -Tribunal tjmt,tjmt-2g -Linha 2  # ou tribunais escolhidos
+```
+
+- Para no primeiro bloqueio (CAPTCHA, acesso bloqueado) ou 2FA recusado, para nao bloquear o acesso
+  do advogado. Entre um tribunal e outro espera `-Pausa` segundos (padrao 5).
+- Saida: `tribunais\formularios.csv` (um campo por linha: rotulo, bloco, tipo, obrigatorio, veio
+  preenchido, bloqueado, opcoes) e `tribunais\formularios-situacao.csv` (um tribunal por linha). Cada
+  execucao substitui so as linhas dos tribunais mapeados nela. Nenhum valor vai para a tabela; nome,
+  e-mail, endereco e numeros do advogado sao mascarados nos rotulos e nas opcoes. Confira antes de
+  versionar.
+- A tabela alimenta `exigencias.py`: campo do formulario de CADASTRO marcado como obrigatorio, que veio
+  vazio e editavel e que sai da planilha (telefone, RG, orgao emissor, data do RG, estado civil) passa a
+  ser exigido naquele tribunal: a linha sem o dado e pulada antes de qualquer acesso. A regra fixa dos
+  TRTs (telefone e RG, que eles so cobram ao enviar) continua valendo.
+- Limite: o mapa ve o que o formulario mostra ANTES de enviar. Campo que o PJe so cobra ao enviar
+  (como nos TRTs) ou que aparece depois de escolher uma opcao nao fica marcado como obrigatorio.

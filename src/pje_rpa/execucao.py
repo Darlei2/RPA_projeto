@@ -29,6 +29,8 @@ class ResultadoCadastro:
     # certificado e chegou ao painel do advogado (o cadastro ficou gravado e o certificado entra).
     login_conferido: bool = False
     login_detalhe: str = ""
+    # Mapeamento (mapear=True): campos do formulario lidos neste tribunal, sem valores.
+    mapa: dict = field(default_factory=dict)
 
 
 def pending_path(audit_root: Path) -> Path:
@@ -68,13 +70,15 @@ def cadastrar(config: AppConfig, record: LawyerRecord, pfx: bytes | None, pfx_pa
               code_provider: Callable[[str], str | None], audit_root: Path, *,
               rehearsal: bool = False, notify: Notify = print, thumbprint: str = "",
               assist=None, senha_sso: bool = False, senha_sso_ja_cadastrado: bool = False,
-              senha_preferida: str = "", conferir_login: bool = False,
+              senha_preferida: str = "", conferir_login: bool = False, mapear: bool = False,
               store=None, browser_factory=None, signer_factory=None) -> ResultadoCadastro:
     """Roda o cadastro com o A1. Nao pede senha do PJe: isso e feito depois (credencial).
 
     conferir_login: depois de concluir o cadastro, sai do PJe (sessao nova) e entra de novo com o
     certificado para confirmar que o advogado chega ao painel. Nada e enviado nesse segundo login.
     Quem ja era cadastrado nao precisa do segundo login: o primeiro ja abriu o painel.
+
+    mapear: so le o formulario (mapeamento.py) e sai; e sempre ensaio, sem senha e sem segundo login.
 
     pfx = None: usa o certificado ja instalado no Windows com o CPF do advogado (ou o
     `thumbprint` indicado), sem instalar nem remover nada e sem senha do certificado.
@@ -95,6 +99,8 @@ def cadastrar(config: AppConfig, record: LawyerRecord, pfx: bytes | None, pfx_pa
         def signer_factory(cfg):
             return PJeOfficeSigner(cfg.signer, site_hosts=(urlparse(cfg.base_url).hostname or "",))
 
+    if mapear:
+        rehearsal, senha_sso, conferir_login, assist = True, False, False, None
     chosen_thumbprint = thumbprint
     thumbprint = None  # daqui em diante: o que ESTA execucao instalou e precisa remover
     browser = None
@@ -129,7 +135,7 @@ def cadastrar(config: AppConfig, record: LawyerRecord, pfx: bytes | None, pfx_pa
         signer = signer_factory(config)
         flow = PJeRegistrationFlow(config, record, info, pfx_password, browser, signer, audit,
                                    code_provider=code_provider, rehearsal=rehearsal,
-                                   request_password=False, assist=assist)
+                                   request_password=False, assist=assist, mapear=mapear)
         result = flow.run()
         # Senha pelo login unico (sem e-mail), aproveitando a sessao do certificado ainda aberta.
         senha, senha_detalhe = "", ""
@@ -198,7 +204,8 @@ def cadastrar(config: AppConfig, record: LawyerRecord, pfx: bytes | None, pfx_pa
         audit.write_result(serialized)
         return ResultadoCadastro(result.status.value, result.reason, audit.run_id,
                                  senha=senha, senha_detalhe=senha_detalhe,
-                                 login_conferido=login_conferido, login_detalhe=login_detalhe)
+                                 login_conferido=login_conferido, login_detalhe=login_detalhe,
+                                 mapa=dict(result.details.get("mapa") or {}))
     except (CertificateError, ConfigurationError) as exc:
         return ResultadoCadastro("ERROR", str(exc))
     except Exception as exc:  # noqa: BLE001

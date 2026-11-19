@@ -47,6 +47,7 @@ class PJeRegistrationFlow:
         rehearsal: bool = False,
         request_password: bool = True,
         assist: Callable[[dict], str] | None = None,
+        mapear: bool = False,
     ) -> None:
         self.config = config
         self.record = record
@@ -64,6 +65,12 @@ class PJeRegistrationFlow:
         # Modo assistido (lote): recebe o relatorio do formulario e devolve
         # "reavaliar", "seguir" ou "parar". None = sem operador (para para revisao).
         self.assist = assist
+        # Mapeamento (mapeamento.py): chega ao formulario, le os campos (sem valores) e sai. Nao
+        # preenche nada; e sempre ensaio (nada e enviado nem assinado).
+        self.mapear = mapear
+        if mapear:
+            self.rehearsal = True
+        self.mapa: dict = {}
         self.state = FlowState.START
 
     def run(self) -> RunResult:
@@ -148,6 +155,9 @@ class PJeRegistrationFlow:
 
         if self.browser.visible("lawyer_panel", 2500):
             self._transition(FlowState.ALREADY_REGISTERED, "existing_profile_detected")
+            if self.mapear:
+                return self._result(RunStatus.ALREADY_REGISTERED,
+                                    "Advogado ja cadastrado neste PJe; " + self._mapear_dados_cadastrais())
             # Ja cadastrado e ainda logado com o A1: alinha o e-mail do PJe ao da planilha (para o
             # link de senha chegar na caixa que controlamos), na mesma sessao. Best-effort.
             nota = self._garantir_email_cadastral()
@@ -171,8 +181,21 @@ class PJeRegistrationFlow:
                 return self._sign_commitment()
             if recusa := self._recusa_do_pje():  # a mensagem pode aparecer depois da espera
                 return self._failed(recusa)
+            if self.mapear:
+                # Tela que o robo nao reconhece como o formulario: guarda os campos dela mesmo assim.
+                from .mapeamento import TELA_DESCONHECIDA
+                self._mapear(TELA_DESCONHECIDA)
             return self._failed("Formulario de cadastro nao localizado apos autenticacao")
         self._transition(FlowState.REGISTRATION_FORM, "registration_form_detected")
+        if self.mapear:
+            from .mapeamento import CADASTRO
+            campos = self._mapear(CADASTRO)
+            botao = self._locate_action("confirm_data", "advance") or {}
+            self.mapa["botao_avancar"] = self._scrub(str(botao.get("text", "")))
+            obrigatorios = sum(c["obrigatorio"] == "sim" for c in campos)
+            return self._result(RunStatus.REHEARSAL_OK,
+                                f"Formulario mapeado: {len(campos)} campo(s), {obrigatorios} obrigatorio(s). "
+                                "Nada foi preenchido, enviado nem assinado")
         if hasattr(self.browser, "page"):
             if (stop := self._adaptive_form()) is not None:
                 return stop
@@ -271,6 +294,43 @@ class PJeRegistrationFlow:
             return self._needs_human("O PJe devolveu o formulario sem indicar o campo"
                                      + (": " + " | ".join(messages) if messages else ""))
         return None
+
+    def _mapear(self, origem: str) -> list[dict]:
+        """Le os controles da tela atual (rotulos, obrigatoriedade, opcoes; nunca valores)."""
+        campos: list[dict] = []
+        if hasattr(self.browser, "page"):
+            from .adaptive_form import scan
+            from .mapeamento import campos_do_formulario
+            try:
+                campos = campos_do_formulario(scan(self.browser.page), self.record)
+            except Exception as exc:  # noqa: BLE001 - sem mapa, o resultado diz por que
+                self.audit.record("form_map_failed", self.state.value, {"origem": origem, "erro": type(exc).__name__})
+        self.mapa = {"origem": origem, "campos": campos}
+        self.audit.record("form_mapped", self.state.value, {
+            "origem": origem, "campos": len(campos),
+            "obrigatorios": sum(c["obrigatorio"] == "sim" for c in campos)})
+        return campos
+
+    def _mapear_dados_cadastrais(self) -> str:
+        """Ja cadastrado: abre 'Alteracao de dados cadastrais' na sessao atual e so le (nao salva)."""
+        from .mapeamento import DADOS_CADASTRAIS, url_dados_cadastrais
+
+        page = getattr(self.browser, "page", None)
+        if page is None:
+            return "sem navegador para ler os dados cadastrais"
+        for url in url_dados_cadastrais(self.config.base_url):
+            try:
+                page.goto(url, wait_until="domcontentloaded", timeout=30000)
+                page.wait_for_timeout(2500)
+            except Exception:  # noqa: BLE001 - tenta o proximo endereco
+                continue
+            if self.browser.visible("login_certificate_button", 500):
+                break   # a sessao caiu: nao entra de novo so para mapear
+            campos = self._mapear(DADOS_CADASTRAIS)
+            if len(campos) >= 3:
+                return f"tela de dados cadastrais mapeada: {len(campos)} campo(s), nada foi salvo"
+        self.mapa = {}
+        return "tela de dados cadastrais nao abriu (formulario de cadastro nao aparece para quem ja e cadastrado)"
 
     def _sign_commitment(self) -> RunResult:
         sign = self._locate_action("sign_term", "sign")
@@ -552,7 +612,7 @@ class PJeRegistrationFlow:
             status=status,
             state=self.state,
             reason=reason,
-            details={"tribunal": self.config.tribunal},
+            details={"tribunal": self.config.tribunal, **({"mapa": self.mapa} if self.mapa else {})},
         )
 
 

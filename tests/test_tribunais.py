@@ -7,6 +7,7 @@ from pje_rpa.config import ConfigurationError, load_config
 from pje_rpa.tribunais import format_relatorio, ramo, relatorio
 
 PROJECT = Path(__file__).resolve().parents[1]
+SEM_TABELA = PROJECT / "tests" / "nao-existe.csv"  # so a regra fixa (sem a tabela do mapeamento)
 TRIBUNAIS = sorted(p for p in (PROJECT / "tribunais").glob("*.toml") if p.name != "_comum.toml")
 
 
@@ -54,7 +55,7 @@ def test_segundo_grau_dos_tjs_herda_o_primeiro_e_fica_fora_da_regra_dos_trts(cha
     assert segundo.tribunal == base.tribunal.replace("1o grau", "2o grau") != base.tribunal
     assert segundo.selectors == base.selectors
     # TJ nao entra na regra "os dois graus numa credencial" nem na exigencia de telefone dos TRTs
-    assert graus.grupo(segundo.base_url) == "" and exigencias.faltando(segundo.base_url, object()) == []
+    assert graus.grupo(segundo.base_url) == "" and exigencias.faltando(segundo.base_url, object(), tabela=SEM_TABELA) == []
 
 
 def test_tribunais_novos_sem_primeiro_grau_no_robo():
@@ -81,7 +82,7 @@ def test_cada_tre_tem_os_dois_graus(uf):
     assert (primeiro.tribunal, segundo.tribunal) == (f"TRE-{uf} - 1o grau", f"TRE-{uf} - 2o grau")
     assert segundo.selectors == primeiro.selectors
     # cada grau tem cadastro e credencial proprios; a exigencia fixa de telefone/RG e so dos TRTs
-    assert graus.grupo(segundo.base_url) == "" and exigencias.faltando(segundo.base_url, object()) == []
+    assert graus.grupo(segundo.base_url) == "" and exigencias.faltando(segundo.base_url, object(), tabela=SEM_TABELA) == []
 
 
 def test_pje_da_planilha_que_faltavam_no_robo():
