@@ -692,6 +692,56 @@ def option_choice(
     return found[0] if len(found) == 1 else None
 
 
+def _mesmo_campo(controls: list[dict[str, Any]], ref: dict[str, Any], key: str) -> dict[str, Any] | None:
+    """O mesmo controle num novo retrato da tela: pelo id, depois pelo name, depois pela posicao + assunto."""
+    for attr in ("id", "name"):
+        if ref.get(attr):
+            achado = next((c for c in controls if c.get(attr) == ref[attr]), None)
+            if achado is not None:
+                return achado
+    return next((c for c in controls if c["index"] == ref["index"] and field_key(c)[0] == key), None)
+
+
+def _depois_da_falha(page: Any, current: dict[str, Any], key: str, value: str, report: dict[str, Any]) -> bool:
+    """A escrita num campo falhou ou nao ficou. O PJe costuma preencher (e travar) o endereco sozinho logo
+    depois do CEP, bem na hora em que o robo escreve no campo: olha o campo de novo antes de pedir ajuda.
+    True = resolvido, e o relatorio ja diz como (mantido como o PJe trouxe, ou preenchido na nova tentativa)."""
+    try:
+        for espera in (800, 1500):
+            page.wait_for_timeout(espera)
+            agora = _mesmo_campo(scan(page)["controls"], current, key)
+            if agora is None:
+                return False
+            shown = agora["value"]
+            if agora["tag"] == "select":
+                shown = next((o["label"] for o in agora["options"] if o["value"] == agora["value"]), shown)
+            if agora["value"] and (same(key, agora["value"], value) or same(key, shown, value)):
+                report["preserved"].append(key)
+                report.setdefault("notes", []).append("reavaliado_apos_falha:" + key)
+                return True
+            travado = agora["disabled"] or agora["readonly"]
+            if travado and key in ADDRESS_KEYS and str(agora["value"] or "").strip():
+                # Mesma regra do campo que ja chega travado: endereco preenchido pelo PJe vale o do PJe.
+                report["preserved"].append(key)
+                report.setdefault("preserved_divergent", []).append(key)
+                report.setdefault("notes", []).append("reavaliado_apos_falha:" + key)
+                return True
+            if travado or agora["tag"] == "select" or agora["type"] in ("checkbox", "radio"):
+                continue  # ainda carregando (ou lista): espera mais um pouco e olha de novo
+            try:
+                page.locator("input,select,textarea").nth(agora["index"]).fill(str(value), timeout=4000)
+            except Exception:  # noqa: BLE001
+                continue
+            depois = _mesmo_campo(scan(page)["controls"], agora, key)
+            if depois is not None and same(key, depois["value"], value):
+                report["filled"].append(key)
+                report.setdefault("notes", []).append("reavaliado_apos_falha:" + key)
+                return True
+    except Exception:  # noqa: BLE001 - a reavaliacao nao pode piorar a falha original
+        return False
+    return False
+
+
 def operate(
     page: Any,
     record: Any,
@@ -1146,15 +1196,16 @@ def operate(
                 and (same(key, changed["value"], value) or same(key, changed_text, value))
             ):
                 report["filled"].append(key)
-            else:
+            elif not _depois_da_falha(page, current, key, value, report):
                 report["pending"].append(
                     "nao_confirmado:" + key
                 )
 
         except Exception:
-            report["pending"].append(
-                "falha_preenchimento:" + key
-            )
+            if not _depois_da_falha(page, current, key, value, report):
+                report["pending"].append(
+                    "falha_preenchimento:" + key
+                )
 
     # Relatorio seguro, sem nome, CPF, OAB ou contatos.
     for section in (
