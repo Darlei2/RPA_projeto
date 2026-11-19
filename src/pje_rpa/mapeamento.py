@@ -1,9 +1,14 @@
 """Mapa do formulario de cadastro de cada PJe: que campos tem e quais sao obrigatorios.
 
-O robo entra com o certificado de UM advogado (com autorizacao), chega ao formulario de cadastro,
-le os campos e SAI: nao preenche, nao clica em "Confirmar dados" e nao assina nada. Onde o advogado
-ja e cadastrado, o formulario de cadastro nao aparece; o robo le entao a tela "Alteracao de dados
-cadastrais" (so le, nao salva), que tem quase os mesmos campos.
+O robo entra com o certificado de UM advogado (com autorizacao), chega ao formulario de cadastro e
+le os campos. Como muitos PJe (os TRTs, por exemplo) so dizem o que e obrigatorio DEPOIS do clique em
+"Confirmar dados", o robo faz esse clique COM TRAVA: apaga so na tela o e-mail (e a confirmacao), que
+todo PJe exige, clica, le os avisos de "campo obrigatorio" do formulario devolvido e sai. Com o e-mail
+vazio o PJe recusa o envio e nada e gravado. Se mesmo assim o formulario passar para o termo de
+compromisso, o robo para ali (nao assina), avisa e interrompe o mapeamento para revisao.
+Sem campo de e-mail editavel para travar, o clique nao e feito (aviso_ao_enviar = nao_testado).
+Onde o advogado ja e cadastrado, o formulario de cadastro nao aparece; o robo le entao a tela
+"Alteracao de dados cadastrais" (so le; ali nao clica em nada, porque salvar alteraria o cadastro).
 
 Saida (sem nenhum valor digitado ou trazido pelo PJe; nome, e-mail, endereco, telefone e numeros
 do advogado sao mascarados nos rotulos e nas opcoes):
@@ -11,8 +16,9 @@ do advogado sao mascarados nos rotulos e nas opcoes):
   tribunais\\formularios-situacao.csv  um tribunal por linha (mapeado, ja cadastrado, falhou...)
 Cada execucao substitui so as linhas dos tribunais mapeados nela.
 
-A tabela alimenta exigencias.py: campo obrigatorio no formulario de cadastro, vazio quando o PJe
-abriu e que vem da planilha (telefone, RG, estado civil...) passa a ser exigido naquele tribunal.
+A tabela alimenta exigencias.py: campo obrigatorio no formulario de cadastro (marcado na tela ou
+cobrado no envio com trava), vazio quando o PJe abriu e que vem da planilha (telefone, RG, estado
+civil...) passa a ser exigido naquele tribunal.
 
   python -m pje_rpa mapear --tribunal trt                  (familia: trt, trf, tj, tre ou todos)
   python -m pje_rpa mapear --tribunal tjmt,tjmt-2g --planilha planilhas\\advogados.xlsx --linha 2
@@ -32,9 +38,12 @@ PASTA = Path(__file__).resolve().parents[2] / "tribunais"
 TABELA = PASTA / "formularios.csv"
 SITUACAO = PASTA / "formularios-situacao.csv"
 
-COLUNAS = ["tribunal", "nome", "url", "origem", "data", "ordem", "campo", "rotulo", "secao", "tipo",
-           "obrigatorio", "veio_preenchido", "bloqueado", "opcoes"]
-COLUNAS_SITUACAO = ["tribunal", "nome", "url", "data", "situacao", "origem", "campos", "obrigatorios", "motivo"]
+# obrigatorio = marcado na tela antes do envio OU cobrado pelo PJe no envio com trava
+COLUNAS = ["tribunal", "nome", "url", "origem", "data", "ordem", "campo", "identificador", "rotulo", "secao",
+           "tipo", "obrigatorio", "marcado_na_tela", "aviso_ao_enviar", "veio_preenchido", "bloqueado", "opcoes"]
+COLUNAS_SITUACAO = ["tribunal", "nome", "url", "data", "situacao", "origem", "campos", "obrigatorios",
+                    "avisos_do_pje", "motivo"]
+NAO_TESTADO = "nao_testado"
 
 # Origem das linhas da tabela
 CADASTRO = "cadastro"                 # formulario de primeiro acesso (o que vale para as exigencias)
@@ -111,15 +120,86 @@ def campos_do_formulario(snapshot: dict, record: Any) -> list[dict[str, str]]:
         linhas.append({
             "ordem": str(ordem),
             "campo": chave or "",
+            "identificador": limpar(c.get("id") or c.get("name") or "", palavras)[:80],
             "rotulo": limpar(rotulo, palavras)[:100],
             "secao": limpar(c.get("section", ""), palavras)[:80],
             "tipo": tipo,
             "obrigatorio": "sim" if c.get("required") else "nao",
+            "marcado_na_tela": "sim" if c.get("required") else "nao",
+            "aviso_ao_enviar": NAO_TESTADO,
             "veio_preenchido": "sim" if preenchido else "nao",
             "bloqueado": "sim" if (c.get("readonly") or c.get("disabled")) else "nao",
             "opcoes": " | ".join(opcoes[:MAX_OPCOES]) + (f" | (+{sobra})" if sobra > 0 else ""),
         })
     return linhas
+
+
+# Apaga (so na tela, sem salvar) os controles indicados e avisa o formulario, como se o operador
+# tivesse apagado. Os indices sao os do adaptive_form.scan (input, select e textarea na ordem da pagina).
+JS_ESVAZIAR = r"""(indices) => {
+  const all = [...document.querySelectorAll('input,select,textarea')];
+  let feitos = 0;
+  for (const i of indices) {
+    const e = all[i];
+    if (!e || e.readOnly || e.disabled) continue;
+    e.focus();
+    e.value = '';
+    for (const tipo of ['input', 'change', 'blur']) e.dispatchEvent(new Event(tipo, {bubbles: true}));
+    if (e.value === '') feitos += 1;
+  }
+  return feitos;
+}"""
+
+
+def indices_do_email(snapshot: dict) -> list[int]:
+    """Campos de e-mail (e confirmacao) editaveis: apaga-los garante que o PJe recuse o envio."""
+    from .adaptive_form import field_key
+
+    indices = []
+    for c in snapshot.get("controls", []) or []:
+        chave, _ = field_key(c)
+        if chave in ("email", "email_confirm") and not (c.get("readonly") or c.get("disabled")):
+            indices.append(c["index"])
+    return indices
+
+
+def juntar_envio(antes: list[dict], depois: list[dict], avisos: list[str]) -> list[dict]:
+    """Junta a leitura antes do clique com a do formulario devolvido pelo PJe: campo marcado como
+    obrigatorio depois do envio (aviso "campo obrigatorio" na linha) ou citado num aviso do PJe vira
+    obrigatorio. Campo que so apareceu depois do envio entra no fim."""
+    citados = set()
+    for aviso in avisos:
+        if "obrigat" in _ascii(aviso):
+            for trecho in re.split(r"[|;\n]", aviso):
+                rotulo = re.sub(r"\s+", " ", re.sub(r"[^a-z0-9 ]+", " ", _ascii(trecho.split(":")[0]))).strip()
+                if rotulo and "obrigat" not in rotulo:
+                    citados.add(rotulo)
+
+    def chave(c):
+        return c["identificador"] or (c["rotulo"], c["tipo"])
+
+    def citado(c):
+        rotulo = re.sub(r"\s+", " ", re.sub(r"[^a-z0-9 ]+", " ", _ascii(c["rotulo"]))).strip()
+        return bool(rotulo) and any(rotulo == r or (len(r) > 3 and r in rotulo) for r in citados)
+
+    por_chave = {chave(c): c for c in depois}
+    usados = set()
+    saida = []
+    for c in antes:
+        d = por_chave.get(chave(c))
+        if d is not None:
+            usados.add(chave(c))
+        avisado = (d is not None and d["obrigatorio"] == "sim" and c["marcado_na_tela"] != "sim") or citado(c)
+        aviso = "sim" if avisado else "nao"
+        saida.append({**c, "aviso_ao_enviar": aviso,
+                      "obrigatorio": "sim" if (c["marcado_na_tela"] == "sim" or aviso == "sim") else "nao"})
+    for d in depois:
+        if chave(d) in usados:
+            continue
+        aviso = "sim" if (d["obrigatorio"] == "sim" or citado(d)) else "nao"
+        saida.append({**d, "ordem": str(len(saida) + 1), "marcado_na_tela": "nao", "aviso_ao_enviar": aviso,
+                      "obrigatorio": aviso})
+    return saida
 
 
 def url_dados_cadastrais(base_url: str) -> list[str]:
@@ -160,7 +240,7 @@ def _gravar(caminho: Path, colunas: list[str], linhas: list[dict[str, str]]) -> 
 
 def registrar(chave: str, config: Any, situacao: str, motivo: str, mapa: dict | None,
               tabela: Path | None = None, arquivo_situacao: Path | None = None,
-              agora: datetime | None = None) -> None:
+              agora: datetime | None = None, avisos: list[str] | None = None) -> None:
     """Substitui, nas duas tabelas, o que havia deste tribunal pelo resultado desta execucao.
     Sem campos lidos (falha antes do formulario), as linhas de campos antigas ficam."""
     tabela = tabela or TABELA
@@ -178,6 +258,7 @@ def registrar(chave: str, config: Any, situacao: str, motivo: str, mapa: dict | 
     situacoes = [l for l in _ler(arquivo_situacao) if l.get("tribunal") != chave]
     situacoes.append({**base, "situacao": situacao, "origem": origem, "campos": str(len(campos)),
                       "obrigatorios": str(sum(c["obrigatorio"] == "sim" for c in campos)),
+                      "avisos_do_pje": " | ".join(avisos or mapa.get("avisos") or [])[:500],
                       "motivo": motivo[:300]})
     situacoes.sort(key=lambda l: l["tribunal"])
     _gravar(arquivo_situacao, COLUNAS_SITUACAO, situacoes)
@@ -189,6 +270,8 @@ def ler_tabela(tabela: Path | None = None) -> list[dict[str, str]]:
 
 def situacao(resultado) -> str:
     mapa = getattr(resultado, "mapa", None) or {}
+    if mapa.get("passou_para_termo"):
+        return "PASSOU_PARA_O_TERMO"
     if mapa.get("campos") and mapa.get("origem") == CADASTRO:
         return "MAPEADO"
     if resultado.status == "ALREADY_REGISTERED":
@@ -219,6 +302,9 @@ def escolher(opcoes: list, texto: str) -> tuple[list, list[str]]:
 
 def _parar_tudo(resultado) -> str:
     """Resultado que pede para nao seguir para o proximo tribunal (evita bloquear o login unico)."""
+    if (getattr(resultado, "mapa", None) or {}).get("passou_para_termo"):
+        return ("o formulario passou para o termo de compromisso mesmo com o e-mail vazio (nada foi "
+                "assinado). Confira o cadastro neste tribunal antes de continuar")
     if resultado.status == "BLOCKED":
         return "bloqueio no tribunal: " + resultado.reason
     if "segundo fator" in _ascii(resultado.reason) and resultado.status == "NEEDS_HUMAN":
@@ -257,7 +343,8 @@ def run_mapear(tribunal: str = "", planilha: str = "", linha: int = 0, pausa: fl
         validas = [l for l in validas if str(l.numero_linha) == resposta] or validas
     advogado = validas[0]
     log(f"\nMAPEAMENTO com o certificado de {advogado.nome} (linha {advogado.numero_linha}) em "
-        f"{len(escolhidos)} tribunal(is). Nada e preenchido, enviado nem assinado.")
+        f"{len(escolhidos)} tribunal(is). Nada e preenchido nem assinado; o envio e feito com o e-mail "
+        "apagado na tela, para o PJe recusar e mostrar o que exige.")
     if not deps.yes("Comecar?", True):
         log("Cancelado.")
         return 1

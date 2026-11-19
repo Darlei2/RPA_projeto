@@ -9,7 +9,8 @@ formulario. Duas fontes, somadas:
    exige telefone, numero do RG e orgao emissor do RG nos dois graus, mas so avisa ao enviar
    (o formulario nao marca esses campos como obrigatorios antes).
 2. Tabela do mapeamento (tribunais\\formularios.csv, gerada por `python -m pje_rpa mapear`): campo
-   do formulario de CADASTRO marcado como obrigatorio, que veio vazio e editavel e que sai da
+   do formulario de CADASTRO obrigatorio (marcado na tela ou cobrado pelo PJe no envio com trava,
+   ver mapeamento.py), que veio vazio e editavel e que sai da
    planilha (telefone, RG, data do RG, estado civil). Nome, CPF, OAB, e-mail e endereco ja sao
    obrigatorios na planilha para todos e nao entram aqui.
 Para outra exigencia so conhecida no envio, acrescente (coluna, descricao, padroes) em EXIGENCIAS.

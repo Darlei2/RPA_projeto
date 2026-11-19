@@ -3,7 +3,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from types import SimpleNamespace
 
-from pje_rpa import exigencias, mapeamento
+from pje_rpa import adaptive_form, exigencias, mapeamento
 from pje_rpa.audit import AuditLog
 from pje_rpa.browser import SimulatedBrowser
 from pje_rpa.certificate import CertificateInfo
@@ -25,7 +25,7 @@ def _ctrl(label, **extra):
     return {**base, **extra}
 
 
-SNAPSHOT = {"controls": [
+SNAPSHOT = {"controls": [dict(c, index=i) for i, c in enumerate([
     _ctrl("Nome", value=RECORD.nome_esperado, readonly=True),
     _ctrl("CPF", value="529.982.247-25", readonly=True),
     _ctrl("E-mail", value=RECORD.email, required=True),
@@ -39,7 +39,13 @@ SNAPSHOT = {"controls": [
     _ctrl(f"Contato {RECORD.email} 71 99999-8888"),
     _ctrl("Estado civil", tag="select", type="select-one",
           options=[{"value": str(i), "label": f"Opcao {i}"} for i in range(25)]),
-]}
+])]}
+
+# Formulario devolvido pelo PJe depois do envio com trava: "campo obrigatorio" no estado civil e um campo
+# que so aparece depois (data de expedicao do RG).
+SNAPSHOT_DEPOIS = {"controls": [
+    dict(c, required=True) if c["label"] == "Estado civil" else dict(c)
+    for c in SNAPSHOT["controls"]] + [_ctrl("Data de expedição", required=True, index=99)]}
 
 
 # ------------------------------------------------------------------ leitura da tela
@@ -139,12 +145,21 @@ def test_tabela_alimenta_as_exigencias(tmp_path):
 
 # ------------------------------------------------------------------ fluxo
 class FakePage:
-    def __init__(self):
+    def __init__(self, snapshot=SNAPSHOT):
         self.visitas = []
         self.url = ""
+        self.snapshot = snapshot
+        self.enviado = False
+        self.apagados = []
+        self.mensagens = ["Estado civil: Campo obrigatório", "E-mail*: campo obrigatório"]
 
     def evaluate(self, script, *args):
-        return SNAPSHOT
+        if script == mapeamento.JS_ESVAZIAR:
+            self.apagados = list(args[0])
+            return len(args[0])
+        if script == adaptive_form.JS_MESSAGES:
+            return self.mensagens if self.enviado else []
+        return SNAPSHOT_DEPOIS if self.enviado else self.snapshot
 
     def goto(self, url, **kwargs):
         self.visitas.append(url)
@@ -158,22 +173,28 @@ class FakePage:
 
 
 class PageBrowser(SimulatedBrowser):
-    def __init__(self, record, scenario="success"):
+    """recusa=True: o PJe devolve o formulario no envio (e-mail vazio); False: passa para o termo."""
+
+    def __init__(self, record, scenario="success", recusa=True, snapshot=SNAPSHOT):
         super().__init__(record, scenario)
-        self.page = FakePage()
+        self.page = FakePage(snapshot)
         self.clicks = []
+        self.recusa = recusa
 
     def click(self, group):
         self.clicks.append(group)
+        if group == "confirm_data" and self.recusa:
+            self.page.enviado = True
+            return
         super().click(group)
 
     def fill(self, group, value):
         raise AssertionError("o mapeamento nao preenche nada")
 
 
-def _fluxo(tmp_path, scenario):
+def _fluxo(tmp_path, scenario, **kw):
     config = load_config(PROJECT / "config.example.toml")
-    browser = PageBrowser(RECORD, scenario)
+    browser = PageBrowser(RECORD, scenario, **kw)
     info = CertificateInfo(RECORD.nome_esperado, RECORD.cpf_esperado, "AC",
                            datetime(2099, 1, 1, tzinfo=timezone.utc), "0" * 40)
     flow = PJeRegistrationFlow(config, RECORD, info, "x", browser, SimulatedSigner(browser), AuditLog(tmp_path),
@@ -181,16 +202,40 @@ def _fluxo(tmp_path, scenario):
     return flow.run(), browser
 
 
-def test_fluxo_le_o_formulario_e_sai_sem_enviar(tmp_path, monkeypatch):
-    from pje_rpa import adaptive_form
-
+def test_envio_com_trava_mostra_o_que_o_pje_cobra(tmp_path, monkeypatch):
     monkeypatch.setattr(adaptive_form, "operate", lambda *a, **k: (_ for _ in ()).throw(AssertionError("preencheu")))
     resultado, browser = _fluxo(tmp_path, "success")
     assert resultado.status == RunStatus.REHEARSAL_OK
-    assert "Formulario mapeado" in resultado.reason and "Nada foi preenchido" in resultado.reason
-    assert "confirm_data" not in browser.clicks and "sign_term" not in browser.clicks
+    assert "envio com trava feito" in resultado.reason and "Nada foi gravado nem assinado" in resultado.reason
+    # so o e-mail foi apagado (na tela), um clique em avancar e nenhuma assinatura
+    assert browser.page.apagados == [2]
+    assert browser.clicks == ["login_certificate_button", "confirm_data"]
     mapa = resultado.details["mapa"]
-    assert mapa["origem"] == "cadastro" and len(mapa["campos"]) == len(SNAPSHOT["controls"])
+    por_rotulo = {c["rotulo"]: c for c in mapa["campos"]}
+    civil = por_rotulo["Estado civil"]
+    assert (civil["marcado_na_tela"], civil["aviso_ao_enviar"], civil["obrigatorio"]) == ("nao", "sim", "sim")
+    data = por_rotulo["Data de expedição"]  # so apareceu depois do envio
+    assert (data["campo"], data["aviso_ao_enviar"], data["obrigatorio"]) == ("rg_data", "sim", "sim")
+    nome = por_rotulo["Nome"]
+    assert (nome["aviso_ao_enviar"], nome["obrigatorio"]) == ("nao", "nao")
+    assert mapa["avisos"] == ["ESTADO CIVIL: CAMPO OBRIGATORIO", "E-MAIL*: CAMPO OBRIGATORIO"]  # mascarados pelo fluxo
+
+
+def test_formulario_que_passa_para_o_termo_para_sem_assinar(tmp_path):
+    resultado, browser = _fluxo(tmp_path, "success", recusa=False)
+    assert resultado.status == RunStatus.NEEDS_HUMAN and "termo de compromisso" in resultado.reason
+    assert "sign_term" not in browser.clicks
+    assert resultado.details["mapa"]["passou_para_termo"] is True
+    estado = ResultadoCadastro("NEEDS_HUMAN", resultado.reason, mapa=resultado.details["mapa"])
+    assert mapeamento.situacao(estado) == "PASSOU_PARA_O_TERMO" and mapeamento._parar_tudo(estado)
+
+
+def test_sem_email_editavel_nao_clica(tmp_path):
+    travado = {"controls": [dict(c, readonly=True) if c["label"] == "E-mail" else c for c in SNAPSHOT["controls"]]}
+    resultado, browser = _fluxo(tmp_path, "success", snapshot=travado)
+    assert resultado.status == RunStatus.REHEARSAL_OK and "sem o clique de envio" in resultado.reason
+    assert "confirm_data" not in browser.clicks
+    assert {c["aviso_ao_enviar"] for c in resultado.details["mapa"]["campos"]} == {"nao_testado"}
 
 
 def test_ja_cadastrado_le_os_dados_cadastrais_sem_salvar(tmp_path):

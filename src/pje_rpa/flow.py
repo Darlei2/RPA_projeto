@@ -65,8 +65,9 @@ class PJeRegistrationFlow:
         # Modo assistido (lote): recebe o relatorio do formulario e devolve
         # "reavaliar", "seguir" ou "parar". None = sem operador (para para revisao).
         self.assist = assist
-        # Mapeamento (mapeamento.py): chega ao formulario, le os campos (sem valores) e sai. Nao
-        # preenche nada; e sempre ensaio (nada e enviado nem assinado).
+        # Mapeamento (mapeamento.py): chega ao formulario, le os campos (sem valores), faz o envio COM
+        # TRAVA (e-mail apagado so na tela: o PJe recusa e mostra o que e obrigatorio) e sai. Nao
+        # preenche nada e nunca assina.
         self.mapear = mapear
         if mapear:
             self.rehearsal = True
@@ -189,13 +190,18 @@ class PJeRegistrationFlow:
         self._transition(FlowState.REGISTRATION_FORM, "registration_form_detected")
         if self.mapear:
             from .mapeamento import CADASTRO
-            campos = self._mapear(CADASTRO)
-            botao = self._locate_action("confirm_data", "advance") or {}
-            self.mapa["botao_avancar"] = self._scrub(str(botao.get("text", "")))
+            self._mapear(CADASTRO)
+            envio = self._envio_com_trava()
+            if self.mapa.get("passou_para_termo"):
+                return self._needs_human(
+                    "ATENCAO: o formulario passou para o termo de compromisso mesmo com o e-mail vazio. "
+                    "Nada foi assinado; confira o cadastro neste tribunal")
+            campos = self.mapa.get("campos", [])
             obrigatorios = sum(c["obrigatorio"] == "sim" for c in campos)
+            no_envio = sum(c["aviso_ao_enviar"] == "sim" for c in campos)
             return self._result(RunStatus.REHEARSAL_OK,
-                                f"Formulario mapeado: {len(campos)} campo(s), {obrigatorios} obrigatorio(s). "
-                                "Nada foi preenchido, enviado nem assinado")
+                                f"Formulario mapeado: {len(campos)} campo(s), {obrigatorios} obrigatorio(s) "
+                                f"({no_envio} so avisado(s) no envio). {envio}. Nada foi gravado nem assinado")
         if hasattr(self.browser, "page"):
             if (stop := self._adaptive_form()) is not None:
                 return stop
@@ -310,6 +316,45 @@ class PJeRegistrationFlow:
             "origem": origem, "campos": len(campos),
             "obrigatorios": sum(c["obrigatorio"] == "sim" for c in campos)})
         return campos
+
+    def _envio_com_trava(self) -> str:
+        """Apaga so na tela o e-mail (que todo PJe exige), clica em avancar e le o que o PJe cobra no
+        formulario devolvido. Devolve uma frase para o resultado."""
+        from .adaptive_form import scan
+        from .mapeamento import JS_ESVAZIAR, campos_do_formulario, indices_do_email, juntar_envio
+
+        page = getattr(self.browser, "page", None)
+        botao = self._locate_action("confirm_data", "advance")
+        if botao and "ambiguous" not in botao:
+            self.mapa["botao_avancar"] = self._scrub(str(botao.get("text", "")))
+        if page is None or not botao or "ambiguous" in botao:
+            return "sem o clique de envio (botao de avancar nao localizado)"
+        try:
+            indices = indices_do_email(scan(page))
+            apagados = page.evaluate(JS_ESVAZIAR, indices) if indices else 0
+        except Exception:  # noqa: BLE001
+            apagados = 0
+        if not apagados:
+            self.audit.record("map_submit_skipped", self.state.value, {"motivo": "sem e-mail editavel"})
+            return "sem o clique de envio (nenhum campo de e-mail editavel para travar o envio)"
+        self._click_action("confirm_data", "advance", botao)
+        self.audit.record("map_submit_clicked_with_blank_email", self.state.value, {"apagados": apagados})
+        if self.browser.visible("commitment_term", 12000):
+            self.mapa["passou_para_termo"] = True
+            self._capture("termo")
+            self.audit.record("map_submit_reached_term", self.state.value)
+            return "o formulario passou para o termo"
+        avisos = self._page_messages()
+        try:
+            depois = campos_do_formulario(scan(page), self.record)
+        except Exception:  # noqa: BLE001
+            depois = []
+        self.mapa["campos"] = juntar_envio(self.mapa.get("campos", []), depois, avisos)
+        self.mapa["avisos"] = avisos[:20]
+        self.audit.record("map_submit_read", self.state.value, {
+            "avisos": len(avisos), "campos_depois": len(depois),
+            "avisados": sum(c["aviso_ao_enviar"] == "sim" for c in self.mapa["campos"])})
+        return "envio com trava feito: o PJe recusou (e-mail vazio) e mostrou o que exige"
 
     def _mapear_dados_cadastrais(self) -> str:
         """Ja cadastrado: abre 'Alteracao de dados cadastrais' na sessao atual e so le (nao salva)."""
