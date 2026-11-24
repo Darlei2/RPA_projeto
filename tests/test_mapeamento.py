@@ -274,3 +274,91 @@ def test_run_mapear_grava_e_para_no_bloqueio(tmp_path, monkeypatch):
     estados = {l["tribunal"]: l["situacao"] for l in mapeamento._ler(tmp_path / "s.csv")}
     assert estados == {"tjmt": "MAPEADO", "tjmt-2g": "BLOCKED"}
     assert any("PAREI AQUI" in l for l in log)
+
+
+# ------------------------------------------------------------------ mapeamento assistido (eproc...)
+def test_tabela_dos_outros_sistemas():
+    opcoes = mapeamento.outros_sistemas()
+    eproc = [o for o in opcoes if o["sistema"] == "eproc"]
+    assert len(eproc) == 29 and all(o["url"].startswith("https://") for o in opcoes)
+    tjsc = next(o for o in opcoes if o["tribunal"] == "tjsc-eproc-1g")
+    assert tjsc["nome"] == "TJSC - eproc 1o grau" and "selecionar_tipo_advogado" in tjsc["url"]
+    escolhidos, invalidos = mapeamento.escolher_outros(opcoes, "tjsc-eproc-1g, xyz")
+    assert [o["tribunal"] for o in escolhidos] == ["tjsc-eproc-1g"] and invalidos == ["xyz"]
+    assert len(mapeamento.escolher_outros(opcoes, "eproc")[0]) == 29
+
+
+class NavegadorFalso:
+    """O operador navega; o robo so abre e le. Depois do 'envio' pelo operador, a tela muda."""
+
+    def __init__(self, config):
+        self.config = config
+        self.page = FakePage()
+        self.avisos = []
+        self.abertos = []
+        self.fechado = False
+
+    def abrir(self, url):
+        self.abertos.append(url)
+
+    def pagina(self):
+        return self.page
+
+    def fechar(self):
+        self.fechado = True
+
+
+def test_mapeamento_assistido_le_antes_e_depois_do_envio_do_operador(tmp_path, monkeypatch):
+    from pje_rpa import lote
+
+    linha = SimpleNamespace(ok=True, usa_windows=True, numero_linha=2, nome="ADV", record=RECORD, thumbprint="",
+                            certificado=None, certificado_info="Windows", erros=[], segredo=lambda k: "")
+    monkeypatch.setattr(lote, "_ler_advogados", lambda planilha, deps: ([linha], None))
+    navegadores = []
+
+    def fabrica(config):
+        nav = NavegadorFalso(config)
+        navegadores.append(nav)
+        return nav
+
+    respostas = iter(["", ""])  # Enter com o formulario na tela; Enter depois de tentar o envio
+
+    def perguntar(prompt):
+        resposta = next(respostas)
+        if "tentei o envio" in prompt:  # o operador apagou o e-mail e clicou em Finalizar
+            navegadores[-1].page.enviado = True
+            navegadores[-1].avisos.append(f"Informe o e-mail {RECORD.email}")
+        return resposta
+
+    log = []
+    deps = Dependencias(ask=perguntar, secret=lambda p: "", yes=lambda p, d=False: True, cadastrar=None,
+                        credencial=None, abrir_caixa=None, entregar=None, log=log.append,
+                        opcoes=Opcoes(perguntar_2fa=False))
+    opcoes = [{"tribunal": "tjsc-eproc-1g", "nome": "TJSC - eproc 1o grau", "sistema": "eproc",
+               "url": "https://eproc1g.tjsc.jus.br/eproc/externo_controlador.php?acao=selecionar_tipo_advogado_cadastro"}]
+    codigo = mapeamento.run_mapear_tela("tjsc-eproc-1g", tabela=tmp_path / "f.csv", arquivo_situacao=tmp_path / "s.csv",
+                                        deps=deps, navegador=fabrica, opcoes=opcoes)
+    assert codigo == 0
+    nav = navegadores[0]
+    assert nav.abertos == [opcoes[0]["url"]] and nav.fechado and nav.page.apagados == []  # o robo nao apagou nada
+    linhas = [l for l in mapeamento.ler_tabela(tmp_path / "f.csv") if l["tribunal"] == "tjsc-eproc-1g"]
+    por_rotulo = {l["rotulo"]: l for l in linhas}
+    assert por_rotulo["Estado civil"]["aviso_ao_enviar"] == "sim" and "Data de expedição" in por_rotulo
+    situacao = {l["tribunal"]: l for l in mapeamento._ler(tmp_path / "s.csv")}["tjsc-eproc-1g"]
+    assert situacao["situacao"] == "MAPEADO_ASSISTIDO" and RECORD.email not in situacao["avisos_do_pje"]
+    assert "***" in situacao["avisos_do_pje"]
+
+
+def test_operador_pode_pular_o_tribunal(tmp_path, monkeypatch):
+    from pje_rpa import lote
+
+    linha = SimpleNamespace(ok=True, usa_windows=True, numero_linha=2, nome="ADV", record=RECORD, thumbprint="",
+                            certificado=None, certificado_info="Windows", erros=[], segredo=lambda k: "")
+    monkeypatch.setattr(lote, "_ler_advogados", lambda planilha, deps: ([linha], None))
+    deps = Dependencias(ask=lambda p: "p", secret=lambda p: "", yes=lambda p, d=False: True, cadastrar=None,
+                        credencial=None, abrir_caixa=None, entregar=None, log=lambda m: None,
+                        opcoes=Opcoes(perguntar_2fa=False))
+    opcoes = [{"tribunal": "tjrs-eproc-1g", "nome": "TJRS - eproc 1o grau", "sistema": "eproc", "url": "https://x.jus.br"}]
+    assert mapeamento.run_mapear_tela("tjrs-eproc-1g", tabela=tmp_path / "f.csv", arquivo_situacao=tmp_path / "s.csv",
+                                      deps=deps, navegador=NavegadorFalso, opcoes=opcoes) == 3
+    assert {l["tribunal"]: l["situacao"] for l in mapeamento._ler(tmp_path / "s.csv")} == {"tjrs-eproc-1g": "PULADO"}

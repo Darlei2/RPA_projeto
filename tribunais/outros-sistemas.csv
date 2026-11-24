@@ -1,0 +1,47 @@
+# Tribunais fora do PJe (eproc, e-SAJ, Projudi, sistemas proprios): pagina de entrada do cadastro, da planilha
+# "Testagem e Cadastro em Tribunais" (aba Cadastros). Usada pelo mapeamento assistido (scripts\mapear-tela.ps1).
+tribunal;nome;sistema;url
+tjac-eproc-1g;TJAC - eproc 1o grau;eproc;https://eproc1g.tjac.jus.br/
+tjac-eproc-2g;TJAC - eproc 2o grau;eproc;https://eproc2g.tjac.jus.br
+tjal-eproc-1g;TJAL - eproc 1o grau;eproc;https://eproc1g.tjal.jus.br/
+tjba-eproc-1g;TJBA - eproc 1o grau;eproc;https://eproc1g.tjba.jus.br/eproc/
+tjmg-eproc-1g;TJMG - eproc 1o grau;eproc;https://eproc1g.tjmg.jus.br/eproc/
+tjmg-eproc-2g;TJMG - eproc 2o grau;eproc;https://eproc2g.tjmg.jus.br/eproc/
+tjms-eproc-1g;TJMS - eproc 1o grau;eproc;https://eproc1g.tjms.jus.br/eproc/
+tjpr-eproc-1g;TJPR - eproc 1o grau;eproc;https://eproc1g.tjpr.jus.br/eproc/
+tjrj-eproc-1g;TJRJ - eproc 1o grau;eproc;https://eproc1g.tjrj.jus.br/eproc/
+tjrj-eproc-2g;TJRJ - eproc 2o grau;eproc;https://eproc2g.tjrj.jus.br/eproc/
+tjrs-eproc-1g;TJRS - eproc 1o grau;eproc;https://eproc1g.tjrs.jus.br/eproc/externo_controlador.php?acao=selecionar_tipo_advogado_cadastrar
+tjrs-eproc-2g;TJRS - eproc 2o grau;eproc;https://eproc2g.tjrs.jus.br/eproc/externo_controlador.php?acao=selecionar_tipo_advogado_cadastrar
+tjsc-eproc-1g;TJSC - eproc 1o grau;eproc;https://eproc1g.tjsc.jus.br/eproc/externo_controlador.php?acao=selecionar_tipo_advogado_cadastrar
+tjsc-eproc-2g;TJSC - eproc 2o grau;eproc;https://eproc2g.tjsc.jus.br/eproc/externo_controlador.php?acao=selecionar_tipo_advogado_cadastrar
+tjse-eproc-1g;TJSE - eproc 1o grau;eproc;https://eproc1g.tjse.jus.br/eproc/
+tjse-eproc-2g;TJSE - eproc 2o grau;eproc;https://eproc2g.tjse.jus.br/eproc/
+tjsp-eproc-1g;TJSP - eproc 1o grau;eproc;https://eproc1g.tjsp.jus.br/eproc/
+tjsp-eproc-2g;TJSP - eproc 2o grau;eproc;https://eproc2g.tjsp.jus.br/eproc/
+tjto-eproc-1g;TJTO - eproc 1o grau;eproc;https://eproc1.tjto.jus.br/eprocV2_prod_1grau/externo_controlador.php?acao=advogado_cadastrar
+tjto-eproc-2g;TJTO - eproc 2o grau;eproc;https://eproc2.tjto.jus.br/eprocV2_prod_2grau/
+trf2-eproc-2g;TRF2 - eproc 2o grau;eproc;https://eproc.trf2.jus.br/eproc/externo_controlador.php?acao=selecionar_tipo_advogado_cadastrar
+trf2-eproc-jfes-1g;TRF2 - eproc JFES 1o grau;eproc;https://eproc.jfes.jus.br/eproc/externo_controlador.php?acao=selecionar_tipo_advogado_cadastrar
+trf2-eproc-jfrj-1g;TRF2 - eproc JFRJ 1o grau;eproc;https://eproc.jfrj.jus.br/eproc/externo_controlador.php?acao=selecionar_tipo_advogado_cadastrar
+trf4-eproc-2g;TRF4 - eproc 2o grau;eproc;https://eproc.trf4.jus.br/eproc2trf4/externo_controlador.php?acao=selecionar_tipo_advogado_cadastrar
+trf4-eproc-jfpr-1g;TRF4 - eproc JFPR 1o grau;eproc;https://eproc.jfpr.jus.br/eprocV2/externo_controlador.php?acao=selecionar_tipo_advogado_cadastrar
+trf4-eproc-jfrs-1g;TRF4 - eproc JFRS 1o grau;eproc;https://eproc.jfrs.jus.br/eprocV2/externo_controlador.php?acao=selecionar_tipo_advogado_cadastrar
+trf4-eproc-jfsc-1g;TRF4 - eproc JFSC 1o grau;eproc;https://eproc.jfsc.jus.br/eprocV2/externo_controlador.php?acao=selecionar_tipo_advogado_cadastrar
+trf6-eproc-1g;TRF6 - eproc 1o grau;eproc;https://eproc1g.trf6.jus.br/eproc/
+trf6-eproc-2g;TRF6 - eproc 2o grau;eproc;https://eproc2g.trf6.jus.br/eproc/
+tjac-esaj-1g;TJAC - esaj 1o grau;esaj;https://esaj.tjac.jus.br/sajcas/login?service=https%3A%2F%2Fesaj.tjac.jus.br%2Fesaj%2Fj_spring_cas_security_check
+tjal-esaj-1g;TJAL - esaj 1o grau;esaj;https://www2.tjal.jus.br/sajcas/login?service=https%3A%2F%2Fwww2.tjal.jus.br%2Fesaj%2Fj_spring_cas_security_check
+tjam-esaj-1g;TJAM - esaj 1o grau;esaj;https://consultasaj.tjam.jus.br/sajcas/login?service=https%3A%2F%2Fconsultasaj.tjam.jus.br%2Fesaj%2Fj_spring_cas_security_check
+tjce-esaj-1g;TJCE - esaj 1o grau;esaj;https://esaj.tjce.jus.br/sajcas/login?service=https%3A%2F%2Fesaj.tjce.jus.br%2Fesaj%2Fj_spring_cas_security_check
+tjms-esaj-1g;TJMS - esaj 1o grau;esaj;https://esaj.tjms.jus.br/sajcas/login
+tjsp-esaj-1g;TJSP - esaj 1o grau;esaj;https://esaj.tjsp.jus.br/sajcas/login?service=https%3A%2F%2Fesaj.tjsp.jus.br%2Fesaj%2Fj_spring_cas_security_check
+tjam-projudi-1g;TJAM - projudi 1o grau;projudi;https://projudi.tjam.jus.br/projudi/
+tjgo-projudi-1g;TJGO - projudi 1o grau;projudi;https://projudi.tjgo.jus.br/#
+tjpr-projudi-1g;TJPR - projudi 1o grau;projudi;https://projudi.tjpr.jus.br/projudi/
+tjrr-projudi-1g;TJRR - projudi 1o grau;projudi;https://projudi.tjrr.jus.br/projudi/
+stf-prop-2g;STF - proprio 2o grau;proprio;https://sistemas.stf.jus.br/cas/login
+stj-prop-2g;STJ - proprio 2o grau;proprio;https://cpe.web.stj.jus.br/#/
+tjrj-prop-1g;TJRJ - proprio 1o grau;proprio;https://www3.tjrj.jus.br/segweb/faces/login.jsp?indGet=true&SIGLASISTEMA=PORTALSERV
+tjse-prop-1g;TJSE - proprio 1o grau;proprio;https://www.tjse.jus.br/portaldoadvogado/
+tst-prop-2g;TST - proprio 2o grau;proprio;https://visualizacao-autos.tst.jus.br/visualizacaoAutos/Iniciar.pub?load=1

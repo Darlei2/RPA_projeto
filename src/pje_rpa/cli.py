@@ -72,6 +72,11 @@ def build_parser() -> argparse.ArgumentParser:
     mapa.add_argument("--pausa", type=float, default=5.0, help="Segundos entre um tribunal e outro")
     mapa.add_argument("--audit-root", type=Path, default=Path("runtime/audit"))
 
+    tela = sub.add_parser("mapear-tela", help="Mapeamento assistido fora do PJe (eproc...): voce navega, o robo le o formulario")
+    tela.add_argument("--tribunal", default="", help="chave de tribunais\\outros-sistemas.csv (ex.: tjsc-eproc-1g) ou eproc")
+    tela.add_argument("--planilha", default="", help="Planilha com o advogado cujo certificado sera usado")
+    tela.add_argument("--linha", type=int, default=0, help="Linha do advogado na planilha (se houver mais de um)")
+
     report = sub.add_parser("relatorio", help="Resume os resultados por tribunal e confere a meta de validacao")
     report.add_argument("--audit-root", type=Path, default=Path("runtime/audit"))
     report.add_argument("--meta", type=int, default=5, help="Minimo de tribunais com cadastro real")
@@ -130,6 +135,9 @@ def main(argv: list[str] | None = None) -> int:
         if args.command == "mapear":
             from .mapeamento import run_mapear
             return run_mapear(args.tribunal, args.planilha, args.linha, args.pausa, args.audit_root)
+        if args.command == "mapear-tela":
+            from .mapeamento import run_mapear_tela
+            return run_mapear_tela(args.tribunal, args.planilha, args.linha)
         if args.command == "relatorio":
             from .tribunais import format_relatorio, relatorio
             data = relatorio(args.audit_root, args.meta)

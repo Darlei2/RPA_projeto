@@ -279,3 +279,21 @@ ali nao clica em nada, porque salvar alteraria o cadastro).
 - Limites: campo que o PJe ja trouxe preenchido para este advogado nao e cobrado no envio (pode ser
   obrigatorio para outro advogado); campo que so aparece depois de escolher uma opcao nao entra; o envio
   com trava nao e feito na tela de dados cadastrais.
+
+## 10. Mapeamento assistido fora do PJe (eproc, e-SAJ, Projudi, sistemas proprios)
+
+O robo ainda nao navega nesses sistemas. No mapeamento assistido ele so abre a pagina de cadastro (lista em
+`tribunais\outros-sistemas.csv`, tirada da planilha "Testagem e Cadastro em Tribunais") e le o formulario;
+quem navega e o operador.
+
+```powershell
+.\scripts\mapear-tela.ps1 -Tribunal tjsc-eproc-1g -Planilha planilhas\mapeamento.xlsx
+```
+
+- No Edge aberto, faca o caminho ate o formulario (eproc: Cadastre-se aqui > Cadastrar advogado > Cadastro
+  com certificado digital > certificado do advogado) e tecle Enter no terminal. O robo nao clica, nao
+  preenche e nao envia nada.
+- Opcional: para ver o que o tribunal cobra no envio, apague SO o e-mail na tela, clique em Finalizar voce
+  mesmo e tecle Enter; o robo le os avisos (inclusive as janelas de alerta, que ele so fecha). Com o
+  e-mail vazio o tribunal recusa. Para terminar sem isso, digite F.
+- A saida vai para as mesmas tabelas do mapeamento do PJe, com a situacao MAPEADO_ASSISTIDO.

@@ -386,3 +386,174 @@ def run_mapear(tribunal: str = "", planilha: str = "", linha: int = 0, pausa: fl
         log("\nResumo: " + ", ".join(f"{k} {v}" for k, v in sorted(contagem.items())))
         log(f"Tabela: {tabela}\nSituacao por tribunal: {arquivo_situacao}")
     return codigo_saida
+
+
+# ------------------------------------------------------------------- mapeamento assistido (fora do PJe)
+# eproc, e-SAJ, Projudi e sistemas proprios: o robo ainda nao sabe navegar neles. No mapeamento
+# assistido ele so ABRE a pagina de cadastro e LE o formulario; quem navega e o operador (Cadastre-se
+# aqui > Cadastrar advogado > Cadastro com certificado digital > escolhe o certificado). O robo nao
+# clica, nao preenche e nao envia nada. Se o operador quiser ver o que o tribunal cobra no envio, ele
+# mesmo apaga o e-mail na tela e clica em Finalizar; o robo so le os avisos que aparecerem.
+OUTROS_SISTEMAS = PASTA / "outros-sistemas.csv"
+ASSISTIDO = "MAPEADO_ASSISTIDO"
+
+
+def outros_sistemas(caminho: Path | None = None) -> list[dict[str, str]]:
+    """Tribunais fora do PJe: {'tribunal','nome','sistema','url'} (linhas com # sao comentario)."""
+    caminho = caminho or OUTROS_SISTEMAS
+    try:
+        texto = caminho.read_text(encoding="utf-8-sig")
+    except FileNotFoundError:
+        return []
+    linhas = [l for l in texto.splitlines() if l.strip() and not l.lstrip().startswith("#")]
+    return [dict(d) for d in csv.DictReader(linhas, delimiter=";")]
+
+
+def escolher_outros(opcoes: list[dict[str, str]], texto: str) -> tuple[list[dict], list[str]]:
+    """Por chave (tjsc-eproc-1g) ou pelo sistema inteiro (eproc, esaj, projudi, proprio)."""
+    escolhidos, invalidos = [], []
+    for parte in [p.casefold() for p in re.split(r"[,;\s]+", texto or "") if p]:
+        achados = [o for o in opcoes if parte in (o["tribunal"], o["sistema"])]
+        if not achados:
+            invalidos.append(parte)
+        escolhidos += [o for o in achados if o not in escolhidos]
+    return escolhidos, invalidos
+
+
+class NavegadorAssistido:
+    """Edge aberto para o operador: guarda os avisos (alert/confirm) das paginas e sempre le a aba
+    mais recente (o cadastro com certificado pode abrir outra aba)."""
+
+    def __init__(self, config) -> None:
+        from .browser import PlaywrightBrowser
+
+        self._browser = PlaywrightBrowser(config)
+        self.avisos: list[str] = []
+        self._vigiar(self._browser.page)
+        try:
+            self._browser._context.on("page", self._vigiar)
+        except Exception:  # noqa: BLE001
+            pass
+
+    def _vigiar(self, page) -> None:
+        def anotar(dialogo) -> None:
+            try:
+                self.avisos.append(str(dialogo.message or ""))
+            finally:
+                try:
+                    dialogo.dismiss()   # so fecha o aviso; nunca confirma nada
+                except Exception:  # noqa: BLE001
+                    pass
+        try:
+            page.on("dialog", anotar)
+        except Exception:  # noqa: BLE001
+            pass
+
+    def abrir(self, url: str) -> None:
+        self._browser.open(url)
+
+    def pagina(self):
+        try:
+            paginas = [p for p in self._browser._context.pages if not p.is_closed()]
+            return paginas[-1] if paginas else self._browser.page
+        except Exception:  # noqa: BLE001
+            return self._browser.page
+
+    def fechar(self) -> None:
+        self._browser.close()
+
+
+def _escolher_advogado(planilha: str, linha: int, deps):
+    from .lote import _ler_advogados
+
+    validas, codigo = _ler_advogados(planilha, deps)
+    if codigo is not None:
+        return None, codigo
+    if linha:
+        validas = [l for l in validas if l.numero_linha == linha]
+        if not validas:
+            deps.log(f"Linha {linha} nao esta entre os advogados prontos da planilha.")
+            return None, 2
+    while len(validas) > 1:
+        resposta = deps.ask("Mapear com o certificado de qual linha da planilha? ").strip()
+        validas = [l for l in validas if str(l.numero_linha) == resposta] or validas
+    return validas[0], None
+
+
+def run_mapear_tela(tribunal: str = "", planilha: str = "", linha: int = 0, tabela: Path | None = None,
+                    arquivo_situacao: Path | None = None, deps=None, navegador=None,
+                    opcoes: list[dict[str, str]] | None = None) -> int:
+    """Mapeamento assistido. 0 = todos lidos; 1 = cancelado; 2 = nada para fazer; 3 = algum ficou sem mapa."""
+    from dataclasses import replace
+
+    from .adaptive_form import page_messages, scan
+    from .config import load_config
+    from .lote import _dependencias_padrao
+
+    deps = deps or _dependencias_padrao()
+    log = deps.log
+    tabela, arquivo_situacao = tabela or TABELA, arquivo_situacao or SITUACAO
+    opcoes = outros_sistemas() if opcoes is None else opcoes
+    escolhidos, invalidos = escolher_outros(opcoes, tribunal) if tribunal else ([], [])
+    while not escolhidos:
+        if invalidos:
+            log("Nao reconhecido(s): " + ", ".join(invalidos))
+        escolhidos, invalidos = escolher_outros(opcoes, deps.ask(
+            "Qual tribunal? (ex.: tjsc-eproc-1g; veja tribunais\\outros-sistemas.csv): "))
+    advogado, codigo = _escolher_advogado(planilha, linha, deps)
+    if advogado is None:
+        return codigo
+    palavras = _palavras_do_advogado(advogado.record)
+    base = load_config(PASTA / "_comum.toml")
+    log(f"\nMAPEAMENTO ASSISTIDO com o certificado de {advogado.nome} (linha {advogado.numero_linha}) em "
+        f"{len(escolhidos)} tribunal(is). O robo so abre a pagina e le o formulario: quem navega e voce.")
+    if not deps.yes("Comecar?", True):
+        log("Cancelado.")
+        return 1
+    codigo_saida = 0
+    for i, opcao in enumerate(escolhidos, start=1):
+        config = replace(base, tribunal=opcao["nome"], base_url=opcao["url"])
+        log(f"\n===== {i}/{len(escolhidos)} {opcao['nome']} ({opcao['url']}) =====")
+        nav = navegador(config) if navegador else NavegadorAssistido(config)
+        try:
+            nav.abrir(opcao["url"])
+            log("No Edge aberto, faca o caminho ate o formulario de cadastro do advogado (no eproc: Cadastre-se "
+                f"aqui > Cadastrar advogado > Cadastro com certificado digital > certificado de {advogado.nome}).")
+            log("NAO clique em Finalizar/Enviar. O robo nao clica nem preenche nada.")
+            if deps.ask("Com o formulario na tela, tecle Enter (P = pular este tribunal): ").strip().casefold() == "p":
+                registrar(opcao["tribunal"], config, "PULADO", "pulado pelo operador", {}, tabela, arquivo_situacao)
+                codigo_saida = 3
+                continue
+            campos = campos_do_formulario(scan(nav.pagina()), advogado.record)
+            if len(campos) < 3:
+                log(f"So {len(campos)} campo(s) na tela: nao parece o formulario de cadastro.")
+            log(f"Formulario lido: {len(campos)} campo(s), {sum(c['obrigatorio'] == 'sim' for c in campos)} "
+                "marcado(s) como obrigatorio(s).")
+            log("Para ver o que o tribunal cobra no envio: apague SO o e-mail na tela, clique em Finalizar voce "
+                "mesmo e tecle Enter aqui (com o e-mail vazio o tribunal recusa). Para terminar sem isso, digite F.")
+            avisos: list[str] = []
+            if deps.ask("Enter = ja tentei o envio com o e-mail vazio; F = terminar: ").strip().casefold() != "f":
+                pagina = nav.pagina()
+                avisos = [limpar(a, palavras) for a in list(nav.avisos) + page_messages(pagina) if a]
+                depois = campos_do_formulario(scan(pagina), advogado.record)
+                campos = juntar_envio(campos, depois, avisos)
+                log(f"Depois do envio: {sum(c['aviso_ao_enviar'] == 'sim' for c in campos)} campo(s) cobrado(s); "
+                    f"{len(avisos)} aviso(s) do tribunal.")
+            estado = ASSISTIDO if len(campos) >= 3 else "TELA_NAO_RECONHECIDA_MAPEADA"
+            if estado != ASSISTIDO:
+                codigo_saida = 3
+            registrar(opcao["tribunal"], config, estado, f"mapeamento assistido ({opcao['sistema']})",
+                      {"origem": CADASTRO, "campos": campos, "avisos": avisos[:20]}, tabela, arquivo_situacao)
+            log(f"{estado}: {len(campos)} campo(s), {sum(c['obrigatorio'] == 'sim' for c in campos)} obrigatorio(s)")
+        except Exception as exc:  # noqa: BLE001
+            log(f"FALHOU: {type(exc).__name__}")
+            registrar(opcao["tribunal"], config, "FAILED", f"falha no mapeamento assistido ({type(exc).__name__})",
+                      {}, tabela, arquivo_situacao)
+            codigo_saida = 3
+        finally:
+            try:
+                nav.fechar()
+            except Exception:  # noqa: BLE001
+                pass
+    log(f"\nTabela: {tabela}\nSituacao por tribunal: {arquivo_situacao}")
+    return codigo_saida
