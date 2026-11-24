@@ -212,11 +212,9 @@ cadastro com o A1 -> termo assinado -> "Solicitar nova senha" -> link do e-mail 
   do cadastro (ou do login de quem ja e cadastrado) o robo usa a acao "atualizar senha" do proprio login
   unico, na mesma sessao do certificado, e testa CPF + senha + 2FA. So se isso nao estiver disponivel ou o
   teste de login falhar ele usa o caminho do e-mail ("Esqueci minha senha").
-- Caixa Gmail sem senha de app: preencha `email_senha` (senha do e-mail) e `email_2fa` (chave de 32
-  caracteres do 2FA do Gmail) na planilha. Na primeira vez o robo entra no Gmail pelo Edge, cria a senha
-  de app e guarda cifrada pelo Windows em `runtime\caixas-email.json` (so o mesmo usuario da mesma
-  maquina decifra). Nas proximas usa IMAP direto. Se o Google pedir captcha/celular, o robo pausa para o
-  operador (nada e contornado).
+- Caixa de e-mail: so por IMAP, com a senha de app na coluna `imap_senha` (ou a que ja estiver guardada
+  cifrada pelo Windows em `runtime\caixas-email.json`). O robo nunca entra no Gmail, nem para gerar senha
+  de app: gere fora do robo. Sem senha IMAP, a senha pelo e-mail fica pendente e o lote segue.
 - `-SoSenha`: para quem JA tem cadastro naqueles tribunais. Nao entra com o certificado (evita bloqueio
   por muitos logins seguidos) e vai direto para "Esqueci minha senha" + e-mail + nova senha + teste.
 

@@ -456,25 +456,30 @@ def test_via_email_pula_o_login_unico_e_nao_loga_no_gmail(pasta, monkeypatch):
         return ResultadoCadastro("COMPLETED", "ok", "run")
 
     deps.cadastrar = cadastrar
-    # o Gmail nunca pode ser chamado nesta rota
-    monkeypatch.setattr(lote, "_senha_de_app_gmail",
-                        lambda *a, **k: (_ for _ in ()).throw(AssertionError("nao deve logar no Gmail")))
     executar_lote(_config(), linhas, pasta / "audit", pasta / "out", deps,
                   rehearsal=False, nova_senha_se_ja_cadastrado=False)
     assert "senha_sso" not in kwargs_vistos          # login unico pulado
     assert fake.credenciais == ["52998224725"]        # foi pelo caminho do e-mail
-    # _abrir_caixa com senha_via_email nunca GERA senha de app nem entra no Gmail. Sem IMAP a conta
-    # fica pendente, sem perguntar nada ao operador (mesmo com senha + chave 2FA do e-mail na planilha).
-    from pje_rpa import senha_cli
+    # _abrir_caixa nunca entra no Gmail: sem IMAP a conta fica pendente, sem perguntar nada ao operador.
+    from pje_rpa import cofre_local, senha_cli
 
-    monkeypatch.setattr(senha_cli, "_setup_inbox", lambda email: "SEM_GMAIL")
-    assert isinstance(lote._abrir_caixa("x@gmail.com", "", "", "", deps, "senha-email", "CHAVE2FA"),
-                      lote.CaixaPendente)
-    assert isinstance(lote._abrir_caixa("x@gmail.com", "", "", "", deps, "", ""), lote.CaixaPendente)
-    assert isinstance(lote._abrir_caixa("x@outlook.com", "", "", "", deps, "senha-email", "CHAVE2FA"),
-                      lote.CaixaPendente)
+    monkeypatch.setattr(cofre_local, "ler", lambda email, *a, **k: "")
+    monkeypatch.setattr(senha_cli, "_setup_inbox", lambda email: "PERGUNTOU")
+    assert isinstance(lote._abrir_caixa("x@gmail.com", "", "", "", deps), lote.CaixaPendente)
+    assert isinstance(lote._abrir_caixa("x@outlook.com", "", "", "", deps), lote.CaixaPendente)
     deps.opcoes.senha_via_email = False  # fora da rota pelo e-mail continua perguntando
-    assert lote._abrir_caixa("x@outlook.com", "", "", "", deps, "", "") == "SEM_GMAIL"
+    assert lote._abrir_caixa("x@outlook.com", "", "", "", deps) == "PERGUNTOU"
+
+
+def test_rota_do_gmail_foi_removida():
+    """O robo nao entra no Gmail: nem o modulo, nem as colunas de senha/2FA do e-mail existem mais."""
+    import importlib.util
+
+    from pje_rpa import lote, planilha
+
+    assert importlib.util.find_spec("pje_rpa.gmail_senha_app") is None
+    assert not hasattr(lote, "_senha_de_app_gmail")
+    assert "email_senha" not in planilha.COLUNAS and "email_2fa" not in planilha.COLUNAS
 
 
 # ------------------------------------------------------------ pontos de encaixe

@@ -104,23 +104,21 @@ def _preparar(monkeypatch, imap_ok=True):
 def test_com_senha_imap_usa_imap(monkeypatch):
     imap = _preparar(monkeypatch)
     deps, _ = _deps(senha_via_email=True)
-    caixa = lote._abrir_caixa("fulana@gmail.com", "", "", "abcd efgh ijkl mnop", deps, "senha-email", CHAVE)
+    caixa = lote._abrir_caixa("fulana@gmail.com", "", "", "abcd efgh ijkl mnop", deps)
     assert isinstance(caixa, imap) and caixa.password == "abcdefghijklmnop"
 
 
 def test_sem_senha_imap_fica_pendente_na_rota_do_email(monkeypatch):
     _preparar(monkeypatch)
     deps, logs = _deps(senha_via_email=True)
-    # mesmo com a senha e a chave 2FA do e-mail na planilha: o robo nao entra no Gmail
-    caixa = lote._abrir_caixa("fulana@gmail.com", "", "", "", deps, "senha-email", CHAVE)
+    caixa = lote._abrir_caixa("fulana@gmail.com", "", "", "", deps)
     assert isinstance(caixa, lote.CaixaPendente) and "sem senha IMAP" in caixa.motivo
-    assert "senha-email" not in " ".join(logs)
 
 
 def test_senha_imap_recusada_fica_pendente_na_rota_do_email(monkeypatch):
     _preparar(monkeypatch, imap_ok=False)
     deps, logs = _deps(senha_via_email=True, assistido=True)
-    caixa = lote._abrir_caixa("fulana@gmail.com", "", "", "abcdefghijklmnop", deps, "senha-email", CHAVE)
+    caixa = lote._abrir_caixa("fulana@gmail.com", "", "", "abcdefghijklmnop", deps)
     assert isinstance(caixa, lote.CaixaPendente) and "recusou a senha IMAP" in caixa.motivo
     assert any("FALHA na caixa de e-mail" in m for m in logs)
 
@@ -128,13 +126,13 @@ def test_senha_imap_recusada_fica_pendente_na_rota_do_email(monkeypatch):
 def test_fora_da_rota_do_email_o_operador_informa_a_caixa(monkeypatch):
     _preparar(monkeypatch)
     deps, _ = _deps()
-    assert lote._abrir_caixa("fulana@outlook.com", "", "", "", deps, "", "") == "PERGUNTOU_AO_OPERADOR"
+    assert lote._abrir_caixa("fulana@outlook.com", "", "", "", deps) == "PERGUNTOU_AO_OPERADOR"
 
 
 def test_conta_pendente_nao_gera_pedido_de_senha_no_pje(monkeypatch):
     _preparar(monkeypatch)
     deps, logs = _deps(senha_via_email=True)
-    caixa = lote._abrir_caixa("semimap@gmail.com", "", "", "", deps, "", "")
+    caixa = lote._abrir_caixa("semimap@gmail.com", "", "", "", deps)
     assert isinstance(caixa, lote.CaixaPendente)
 
     chamadas = []

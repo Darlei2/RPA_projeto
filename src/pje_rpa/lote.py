@@ -163,44 +163,29 @@ def _dependencias_padrao() -> Dependencias:
     )
 
 
-def _abrir_caixa(email: str, host: str, user: str, password: str, deps: Dependencias,
-                 email_senha: str = "", email_2fa: str = ""):
-    """Caixa de e-mail do advogado, sempre por IMAP.
+def _abrir_caixa(email: str, host: str, user: str, password: str, deps: Dependencias):
+    """Caixa de e-mail do advogado, sempre por IMAP. O robo NUNCA entra no Gmail (nem para gerar
+    senha de app): a senha de app e gerada fora do robo e vai na coluna imap_senha.
 
-    Senha da caixa, nesta ordem: coluna imap_senha; senha de app ja guardada (cofre local); fora
-    da rota pelo e-mail, senha de app gerada agora no Gmail com email_senha + email_2fa da planilha.
+    Senha da caixa, nesta ordem: coluna imap_senha; senha ja guardada no cofre do Windows.
     Sem senha que funcione: na rota pelo e-mail a conta fica pendente (o robo nao para para
     perguntar); fora dela, o operador informa a caixa na hora.
     """
     from . import cofre_local, senha_cli
     from .email_inbox import ImapInbox, guess_imap_host
 
-    gerada = False
-    if deps.opcoes.senha_via_email:
-        # Rota de e-mail com IMAP cadastrado a mao: usa a imap_senha da planilha ou o cofre e
-        # nao gera senha de app.
-        email_senha = email_2fa = ""
     if not password:
         password = cofre_local.ler(email)
-    if not password and email_senha and email_2fa:
-        password, gerada = _senha_de_app_gmail(email, email_senha, email_2fa, deps), True
     if not password:
-        return _sem_imap(email, deps, "sem senha IMAP para esta conta")
+        return _sem_imap(email, deps, "sem senha IMAP para esta conta (preencha imap_senha com a senha de app)")
     inbox = ImapInbox(host=host or guess_imap_host(email) or "", user=user or email,
                       password=re.sub(r"\s", "", password))
     try:
         inbox.check_login()
         deps.log("OK: caixa de e-mail acessada")
-        if gerada:
-            if cofre_local.guardar(email, password):
-                deps.log("  senha de app guardada no cofre do Windows: proximas execucoes nao entram no Gmail")
         return inbox
     except Exception as exc:  # noqa: BLE001
         deps.log(f"FALHA na caixa de e-mail: {senha_cli._imap_reason(exc, len(password))}")
-        if not gerada and email_senha and email_2fa and cofre_local.ler(email):
-            cofre_local.apagar(email)  # senha de app revogada: gera outra
-            deps.log("  a senha de app guardada nao vale mais; gerando outra")
-            return _abrir_caixa(email, host, user, "", deps, email_senha, email_2fa)
         return _sem_imap(email, deps, "a caixa recusou a senha IMAP")
 
 
@@ -218,26 +203,6 @@ def _sem_imap(email: str, deps: Dependencias, por_que: str):
     if deps.opcoes.senha_via_email:
         return CaixaPendente(por_que)
     return senha_cli._setup_inbox(email)
-
-
-def _senha_de_app_gmail(email: str, senha: str, chave: str, deps: Dependencias) -> str:
-    from .gmail_senha_app import GmailError, e_gmail, gerar_senha_de_app
-
-    if not e_gmail(email):
-        deps.log("  email_senha/email_2fa so sao usados em contas Gmail; para outros provedores use imap_senha")
-        return ""
-
-    def assist(motivo: str) -> str:
-        deps.log(f"\n  >>> Gmail: {motivo}.")
-        deps.log("      Termine no navegador aberto e tecle Enter, ou cole a senha de app de 16 letras se ja gerou.")
-        return deps.secret("  Senha de app (Enter = terminei no navegador)")
-
-    deps.log("Gerando a senha de app do Gmail (so na primeira vez desta conta)...")
-    try:
-        return gerar_senha_de_app(email, senha, chave, assist=assist if deps.opcoes.assistido else None)
-    except GmailError as exc:
-        deps.log(f"FALHA ao gerar a senha de app do Gmail: {exc}")
-        return ""
 
 
 def _code_provider(secret_2fa: str, deps: Dependencias):
@@ -503,8 +468,7 @@ def _etapa_senha(config, linha, audit_root: Path, deps: Dependencias, res, cache
     deps.log("2/2 Credencial: nova senha pelo e-mail e teste de CPF + senha + 2FA")
     if "inbox" not in cache:
         cache["inbox"] = deps.abrir_caixa(record.email, linha.segredo("imap_servidor"),
-                                          linha.segredo("imap_usuario"), linha.segredo("imap_senha"), deps,
-                                          linha.segredo("email_senha"), linha.segredo("email_2fa"))
+                                          linha.segredo("imap_usuario"), linha.segredo("imap_senha"), deps)
     inbox = cache["inbox"]
     if isinstance(inbox, CaixaPendente):
         # Sem como ler o e-mail desta conta: nao pede senha nova ao PJe (o link chegaria e se perderia).
