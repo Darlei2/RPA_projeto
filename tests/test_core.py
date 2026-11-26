@@ -148,7 +148,8 @@ class CoreTests(unittest.TestCase):
     def test_rehearsal_skips_approval_flags_but_keeps_official_domain(self) -> None:
         record = replace(self.record, nome_esperado="FULANO DA SILVA", email="fulano@adv.com.br")
         official = replace(self.config, environment="production",
-                           base_url="https://pje.trt2.jus.br/primeirograu/login.seam")
+                           base_url="https://pje.trt2.jus.br/primeirograu/login.seam",
+                           hosts_autorizados=("pje.trt2.jus.br",))
         assert_rehearsal_ready(official, record)  # sem selectors_approved/allow_live_submission
         with self.assertRaises(ConfigurationError):
             assert_live_ready(official, record)

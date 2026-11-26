@@ -330,14 +330,14 @@ def test_real_com_tribunal_nao_liberado_segue_so_com_os_liberados(pasta, monkeyp
 
     trib = tmp_path / "tribunais"
     trib.mkdir()
-    for nome in ("_comum.toml", "tjpe.toml"):
+    for nome in ("_comum.toml", "_registro.toml", "tjpe.toml"):
         shutil.copy(PROJECT / "tribunais" / nome, trib / nome)
     texto = (PROJECT / "tribunais" / "tremg.toml").read_text(encoding="utf-8")
     (trib / "tremg.toml").write_text(texto.replace("selectors_approved = false", "selectors_approved = true")
                                      .replace("allow_live_submission = false", "allow_live_submission = true"),
                                      encoding="utf-8")
     original = lote.listar_tribunais
-    monkeypatch.setattr(lote, "listar_tribunais", lambda pasta=trib: original(trib))
+    monkeypatch.setattr(lote, "listar_tribunais", lambda pasta=trib, erros=None: original(trib, erros))
     planilha = _xlsx(pasta / "a.xlsx", [_linha()])
     fake = Fake(respostas=["tremg, tjpe", str(planilha)], cadastro=["COMPLETED"])
     run_executar(pasta / "audit", pasta / "out", ensaio=False, deps=fake.deps())
@@ -366,13 +366,14 @@ def test_so_senha_nao_entra_com_certificado(pasta, monkeypatch, tmp_path):
     trib = tmp_path / "tribunais"
     trib.mkdir()
     shutil.copy(PROJECT / "tribunais" / "_comum.toml", trib / "_comum.toml")
+    shutil.copy(PROJECT / "tribunais" / "_registro.toml", trib / "_registro.toml")
     # tribunal fora da regra dos dois graus (a regra tem testes proprios em test_graus.py)
     texto = (PROJECT / "tribunais" / "tjpe.toml").read_text(encoding="utf-8")
     (trib / "tjpe.toml").write_text(texto.replace("selectors_approved = false", "selectors_approved = true")
                                     .replace("allow_live_submission = false", "allow_live_submission = true"),
                                     encoding="utf-8")
     original = lote.listar_tribunais
-    monkeypatch.setattr(lote, "listar_tribunais", lambda pasta=trib: original(trib))
+    monkeypatch.setattr(lote, "listar_tribunais", lambda pasta=trib, erros=None: original(trib, erros))
     planilha = _xlsx(pasta / "a.xlsx", [_linha(senha="nao-deve-ser-usada")])
     fake = Fake(respostas=[str(planilha)])
     perguntas = []

@@ -1,0 +1,1597 @@
+# Registro unico dos tribunais: a IDENTIDADE de cada tribunal (fonte da verdade).
+#
+# id                identificador interno e permanente; e o nome do arquivo tribunais\<id>.toml e e por
+#                   ele que pedidos, integracoes, historico e regras reconhecem o tribunal. Nunca mude.
+# nome              nome de exibicao (o mesmo do campo `tribunal` do .toml).
+# ramo / sigla      TRT, TJ, TRF, TRE, TSE, TST, CNJ / TRT5, TJES, TREMG...
+# grau              "1G", "2G" ou "" (instancia unica).
+# grupo_credencial  tribunais que compartilham UMA credencial (os dois graus de cada TRT); "" = independente.
+# endereco_padrao   endereco de login de referencia (o do .toml no Git); usado so para reconhecer registros
+#                   antigos que guardavam o endereco no lugar da identidade.
+# hosts_autorizados hosts em que a navegacao pode comecar (validacao de enderecos, independente da identidade).
+#                   Se o tribunal mudar de endereco oficial, mude o base_url no .toml e, se o host mudar,
+#                   acrescente o novo aqui. Nenhum codigo, pedido ou credencial precisa mudar.
+
+[[tribunal]]
+id = "cnj"
+nome = "CNJ"
+sistema = "pje"
+ramo = "CNJ"
+sigla = "CNJ"
+grau = ""
+grupo_credencial = ""
+endereco_padrao = "https://www.cnj.jus.br/pjecnj/login.seam"
+hosts_autorizados = ["www.cnj.jus.br"]
+
+[[tribunal]]
+id = "tjap-2g"
+nome = "TJAP - 2o grau"
+sistema = "pje"
+ramo = "TJ"
+sigla = "TJAP"
+grau = "2G"
+grupo_credencial = ""
+endereco_padrao = "https://pje.tjap.jus.br/2g/login.seam"
+hosts_autorizados = ["pje.tjap.jus.br"]
+
+[[tribunal]]
+id = "tjap"
+nome = "TJAP - 1o grau"
+sistema = "pje"
+ramo = "TJ"
+sigla = "TJAP"
+grau = "1G"
+grupo_credencial = ""
+endereco_padrao = "https://pje.tjap.jus.br/1g/login.seam"
+hosts_autorizados = ["pje.tjap.jus.br"]
+
+[[tribunal]]
+id = "tjba-2g"
+nome = "TJBA - 2o grau"
+sistema = "pje"
+ramo = "TJ"
+sigla = "TJBA"
+grau = "2G"
+grupo_credencial = ""
+endereco_padrao = "https://pje2g.tjba.jus.br/pje/login.seam"
+hosts_autorizados = ["pje2g.tjba.jus.br"]
+
+[[tribunal]]
+id = "tjba"
+nome = "TJBA - 1o grau"
+sistema = "pje"
+ramo = "TJ"
+sigla = "TJBA"
+grau = "1G"
+grupo_credencial = ""
+endereco_padrao = "https://pje.tjba.jus.br/pje/login.seam"
+hosts_autorizados = ["pje.tjba.jus.br"]
+
+[[tribunal]]
+id = "tjce-2g"
+nome = "TJCE - 2o grau"
+sistema = "pje"
+ramo = "TJ"
+sigla = "TJCE"
+grau = "2G"
+grupo_credencial = ""
+endereco_padrao = "https://pje.tjce.jus.br/pje2grau/login.seam"
+hosts_autorizados = ["pje.tjce.jus.br"]
+
+[[tribunal]]
+id = "tjce"
+nome = "TJCE - 1o grau"
+sistema = "pje"
+ramo = "TJ"
+sigla = "TJCE"
+grau = "1G"
+grupo_credencial = ""
+endereco_padrao = "https://pje.tjce.jus.br/pje1grau/login.seam"
+hosts_autorizados = ["pje.tjce.jus.br"]
+
+[[tribunal]]
+id = "tjdft-2g"
+nome = "TJDFT - 2o grau"
+sistema = "pje"
+ramo = "TJ"
+sigla = "TJDFT"
+grau = "2G"
+grupo_credencial = ""
+endereco_padrao = "https://pje2i.tjdft.jus.br/pje/login.seam"
+hosts_autorizados = ["pje2i.tjdft.jus.br"]
+
+[[tribunal]]
+id = "tjdft"
+nome = "TJDFT - 1o grau"
+sistema = "pje"
+ramo = "TJ"
+sigla = "TJDFT"
+grau = "1G"
+grupo_credencial = ""
+endereco_padrao = "https://pje.tjdft.jus.br/pje/login.seam"
+hosts_autorizados = ["pje.tjdft.jus.br"]
+
+[[tribunal]]
+id = "tjes-2g"
+nome = "TJES - 2o grau"
+sistema = "pje"
+ramo = "TJ"
+sigla = "TJES"
+grau = "2G"
+grupo_credencial = ""
+endereco_padrao = "https://pje.tjes.jus.br/pje2g/login.seam"
+hosts_autorizados = ["pje.tjes.jus.br"]
+
+[[tribunal]]
+id = "tjes"
+nome = "TJES - 1o grau"
+sistema = "pje"
+ramo = "TJ"
+sigla = "TJES"
+grau = "1G"
+grupo_credencial = ""
+endereco_padrao = "https://pje.tjes.jus.br/pje/login.seam"
+hosts_autorizados = ["pje.tjes.jus.br"]
+
+[[tribunal]]
+id = "tjma-2g"
+nome = "TJMA - 2o grau"
+sistema = "pje"
+ramo = "TJ"
+sigla = "TJMA"
+grau = "2G"
+grupo_credencial = ""
+endereco_padrao = "https://pje2.tjma.jus.br/pje2g/login.seam"
+hosts_autorizados = ["pje2.tjma.jus.br"]
+
+[[tribunal]]
+id = "tjma"
+nome = "TJMA - 1o grau"
+sistema = "pje"
+ramo = "TJ"
+sigla = "TJMA"
+grau = "1G"
+grupo_credencial = ""
+endereco_padrao = "https://pje.tjma.jus.br/pje/login.seam"
+hosts_autorizados = ["pje.tjma.jus.br"]
+
+[[tribunal]]
+id = "tjmg-2g"
+nome = "TJMG - 2o grau"
+sistema = "pje"
+ramo = "TJ"
+sigla = "TJMG"
+grau = "2G"
+grupo_credencial = ""
+endereco_padrao = "https://pjerecursal.tjmg.jus.br/pje/login.seam"
+hosts_autorizados = ["pjerecursal.tjmg.jus.br"]
+
+[[tribunal]]
+id = "tjmg"
+nome = "TJMG - 1o grau"
+sistema = "pje"
+ramo = "TJ"
+sigla = "TJMG"
+grau = "1G"
+grupo_credencial = ""
+endereco_padrao = "https://pje.tjmg.jus.br/pje/login.seam"
+hosts_autorizados = ["pje.tjmg.jus.br"]
+
+[[tribunal]]
+id = "tjmt-2g"
+nome = "TJMT - 2o grau"
+sistema = "pje"
+ramo = "TJ"
+sigla = "TJMT"
+grau = "2G"
+grupo_credencial = ""
+endereco_padrao = "https://pje2.tjmt.jus.br/pje2/login.seam"
+hosts_autorizados = ["pje2.tjmt.jus.br"]
+
+[[tribunal]]
+id = "tjmt"
+nome = "TJMT - 1o grau"
+sistema = "pje"
+ramo = "TJ"
+sigla = "TJMT"
+grau = "1G"
+grupo_credencial = ""
+endereco_padrao = "https://pje.tjmt.jus.br/pje/login.seam"
+hosts_autorizados = ["pje.tjmt.jus.br"]
+
+[[tribunal]]
+id = "tjpa-2g"
+nome = "TJPA - 2o grau"
+sistema = "pje"
+ramo = "TJ"
+sigla = "TJPA"
+grau = "2G"
+grupo_credencial = ""
+endereco_padrao = "https://pje.tjpa.jus.br/pje-2g/login.seam"
+hosts_autorizados = ["pje.tjpa.jus.br"]
+
+[[tribunal]]
+id = "tjpa"
+nome = "TJPA - 1o grau"
+sistema = "pje"
+ramo = "TJ"
+sigla = "TJPA"
+grau = "1G"
+grupo_credencial = ""
+endereco_padrao = "https://pje.tjpa.jus.br/pje/login.seam"
+hosts_autorizados = ["pje.tjpa.jus.br"]
+
+[[tribunal]]
+id = "tjpb-2g"
+nome = "TJPB - 2o grau"
+sistema = "pje"
+ramo = "TJ"
+sigla = "TJPB"
+grau = "2G"
+grupo_credencial = ""
+endereco_padrao = "https://pje.tjpb.jus.br/pje2g/login.seam"
+hosts_autorizados = ["pje.tjpb.jus.br"]
+
+[[tribunal]]
+id = "tjpb"
+nome = "TJPB - 1o grau"
+sistema = "pje"
+ramo = "TJ"
+sigla = "TJPB"
+grau = "1G"
+grupo_credencial = ""
+endereco_padrao = "https://pje.tjpb.jus.br/pje/login.seam"
+hosts_autorizados = ["pje.tjpb.jus.br"]
+
+[[tribunal]]
+id = "tjpe-2g"
+nome = "TJPE - 2o grau"
+sistema = "pje"
+ramo = "TJ"
+sigla = "TJPE"
+grau = "2G"
+grupo_credencial = ""
+endereco_padrao = "https://pje.cloud.tjpe.jus.br/2g/login.seam"
+hosts_autorizados = ["pje.cloud.tjpe.jus.br"]
+
+[[tribunal]]
+id = "tjpe"
+nome = "TJPE - 1o grau"
+sistema = "pje"
+ramo = "TJ"
+sigla = "TJPE"
+grau = "1G"
+grupo_credencial = ""
+endereco_padrao = "https://pje.cloud.tjpe.jus.br/1g/login.seam"
+hosts_autorizados = ["pje.cloud.tjpe.jus.br"]
+
+[[tribunal]]
+id = "tjpi-2g"
+nome = "TJPI - 2o grau"
+sistema = "pje"
+ramo = "TJ"
+sigla = "TJPI"
+grau = "2G"
+grupo_credencial = ""
+endereco_padrao = "https://pje.tjpi.jus.br/2g/login.seam"
+hosts_autorizados = ["pje.tjpi.jus.br"]
+
+[[tribunal]]
+id = "tjpi"
+nome = "TJPI - 1o grau"
+sistema = "pje"
+ramo = "TJ"
+sigla = "TJPI"
+grau = "1G"
+grupo_credencial = ""
+endereco_padrao = "https://pje.tjpi.jus.br/1g/login.seam"
+hosts_autorizados = ["pje.tjpi.jus.br"]
+
+[[tribunal]]
+id = "tjrj"
+nome = "TJRJ - 1o grau"
+sistema = "pje"
+ramo = "TJ"
+sigla = "TJRJ"
+grau = "1G"
+grupo_credencial = ""
+endereco_padrao = "https://tjrj.pje.jus.br/1g/login.seam"
+hosts_autorizados = ["tjrj.pje.jus.br"]
+
+[[tribunal]]
+id = "tjrn-2g"
+nome = "TJRN - 2o grau"
+sistema = "pje"
+ramo = "TJ"
+sigla = "TJRN"
+grau = "2G"
+grupo_credencial = ""
+endereco_padrao = "https://pje2g.tjrn.jus.br/pje/login.seam"
+hosts_autorizados = ["pje2g.tjrn.jus.br"]
+
+[[tribunal]]
+id = "tjrn"
+nome = "TJRN - 1o grau"
+sistema = "pje"
+ramo = "TJ"
+sigla = "TJRN"
+grau = "1G"
+grupo_credencial = ""
+endereco_padrao = "https://pje1g.tjrn.jus.br/pje/login.seam"
+hosts_autorizados = ["pje1g.tjrn.jus.br"]
+
+[[tribunal]]
+id = "tjro-2g"
+nome = "TJRO - 2o grau"
+sistema = "pje"
+ramo = "TJ"
+sigla = "TJRO"
+grau = "2G"
+grupo_credencial = ""
+endereco_padrao = "https://pjesg.tjro.jus.br/pje/login.seam"
+hosts_autorizados = ["pjesg.tjro.jus.br"]
+
+[[tribunal]]
+id = "tjro"
+nome = "TJRO - 1o grau"
+sistema = "pje"
+ramo = "TJ"
+sigla = "TJRO"
+grau = "1G"
+grupo_credencial = ""
+endereco_padrao = "https://pjepg.tjro.jus.br/pje/login.seam"
+hosts_autorizados = ["pjepg.tjro.jus.br"]
+
+[[tribunal]]
+id = "treac-2g"
+nome = "TRE-AC - 2o grau"
+sistema = "pje"
+ramo = "TRE"
+sigla = "TREAC"
+grau = "2G"
+grupo_credencial = ""
+endereco_padrao = "https://pje.tre-ac.jus.br/pje/login.seam"
+hosts_autorizados = ["pje.tre-ac.jus.br"]
+
+[[tribunal]]
+id = "treac"
+nome = "TRE-AC - 1o grau"
+sistema = "pje"
+ramo = "TRE"
+sigla = "TREAC"
+grau = "1G"
+grupo_credencial = ""
+endereco_padrao = "https://pje1g-ac.tse.jus.br/pje/login.seam"
+hosts_autorizados = ["pje1g-ac.tse.jus.br"]
+
+[[tribunal]]
+id = "treal-2g"
+nome = "TRE-AL - 2o grau"
+sistema = "pje"
+ramo = "TRE"
+sigla = "TREAL"
+grau = "2G"
+grupo_credencial = ""
+endereco_padrao = "https://pje.tre-al.jus.br/pje/login.seam"
+hosts_autorizados = ["pje.tre-al.jus.br"]
+
+[[tribunal]]
+id = "treal"
+nome = "TRE-AL - 1o grau"
+sistema = "pje"
+ramo = "TRE"
+sigla = "TREAL"
+grau = "1G"
+grupo_credencial = ""
+endereco_padrao = "https://pje1g-al.tse.jus.br/pje/login.seam"
+hosts_autorizados = ["pje1g-al.tse.jus.br"]
+
+[[tribunal]]
+id = "tream-2g"
+nome = "TRE-AM - 2o grau"
+sistema = "pje"
+ramo = "TRE"
+sigla = "TREAM"
+grau = "2G"
+grupo_credencial = ""
+endereco_padrao = "https://pje.tre-am.jus.br/pje/login.seam"
+hosts_autorizados = ["pje.tre-am.jus.br"]
+
+[[tribunal]]
+id = "tream"
+nome = "TRE-AM - 1o grau"
+sistema = "pje"
+ramo = "TRE"
+sigla = "TREAM"
+grau = "1G"
+grupo_credencial = ""
+endereco_padrao = "https://pje1g-am.tse.jus.br/pje/login.seam"
+hosts_autorizados = ["pje1g-am.tse.jus.br"]
+
+[[tribunal]]
+id = "treap-2g"
+nome = "TRE-AP - 2o grau"
+sistema = "pje"
+ramo = "TRE"
+sigla = "TREAP"
+grau = "2G"
+grupo_credencial = ""
+endereco_padrao = "https://pje.tre-ap.jus.br/pje/login.seam"
+hosts_autorizados = ["pje.tre-ap.jus.br"]
+
+[[tribunal]]
+id = "treap"
+nome = "TRE-AP - 1o grau"
+sistema = "pje"
+ramo = "TRE"
+sigla = "TREAP"
+grau = "1G"
+grupo_credencial = ""
+endereco_padrao = "https://pje1g-ap.tse.jus.br/pje/login.seam"
+hosts_autorizados = ["pje1g-ap.tse.jus.br"]
+
+[[tribunal]]
+id = "treba-2g"
+nome = "TRE-BA - 2o grau"
+sistema = "pje"
+ramo = "TRE"
+sigla = "TREBA"
+grau = "2G"
+grupo_credencial = ""
+endereco_padrao = "https://pje.tre-ba.jus.br/pje/login.seam"
+hosts_autorizados = ["pje.tre-ba.jus.br"]
+
+[[tribunal]]
+id = "treba"
+nome = "TRE-BA - 1o grau"
+sistema = "pje"
+ramo = "TRE"
+sigla = "TREBA"
+grau = "1G"
+grupo_credencial = ""
+endereco_padrao = "https://pje1g-ba.tse.jus.br/pje/login.seam"
+hosts_autorizados = ["pje1g-ba.tse.jus.br"]
+
+[[tribunal]]
+id = "trece-2g"
+nome = "TRE-CE - 2o grau"
+sistema = "pje"
+ramo = "TRE"
+sigla = "TRECE"
+grau = "2G"
+grupo_credencial = ""
+endereco_padrao = "https://pje.tre-ce.jus.br/pje/login.seam"
+hosts_autorizados = ["pje.tre-ce.jus.br"]
+
+[[tribunal]]
+id = "trece"
+nome = "TRE-CE - 1o grau"
+sistema = "pje"
+ramo = "TRE"
+sigla = "TRECE"
+grau = "1G"
+grupo_credencial = ""
+endereco_padrao = "https://pje1g-ce.tse.jus.br/pje/login.seam"
+hosts_autorizados = ["pje1g-ce.tse.jus.br"]
+
+[[tribunal]]
+id = "tredf-2g"
+nome = "TRE-DF - 2o grau"
+sistema = "pje"
+ramo = "TRE"
+sigla = "TREDF"
+grau = "2G"
+grupo_credencial = ""
+endereco_padrao = "https://pje.tre-df.jus.br/pje/login.seam"
+hosts_autorizados = ["pje.tre-df.jus.br"]
+
+[[tribunal]]
+id = "tredf"
+nome = "TRE-DF - 1o grau"
+sistema = "pje"
+ramo = "TRE"
+sigla = "TREDF"
+grau = "1G"
+grupo_credencial = ""
+endereco_padrao = "https://pje1g-df.tse.jus.br/pje/login.seam"
+hosts_autorizados = ["pje1g-df.tse.jus.br"]
+
+[[tribunal]]
+id = "trees-2g"
+nome = "TRE-ES - 2o grau"
+sistema = "pje"
+ramo = "TRE"
+sigla = "TREES"
+grau = "2G"
+grupo_credencial = ""
+endereco_padrao = "https://pje.tre-es.jus.br/pje/login.seam"
+hosts_autorizados = ["pje.tre-es.jus.br"]
+
+[[tribunal]]
+id = "trees"
+nome = "TRE-ES - 1o grau"
+sistema = "pje"
+ramo = "TRE"
+sigla = "TREES"
+grau = "1G"
+grupo_credencial = ""
+endereco_padrao = "https://pje1g-es.tse.jus.br/pje/login.seam"
+hosts_autorizados = ["pje1g-es.tse.jus.br"]
+
+[[tribunal]]
+id = "trego-2g"
+nome = "TRE-GO - 2o grau"
+sistema = "pje"
+ramo = "TRE"
+sigla = "TREGO"
+grau = "2G"
+grupo_credencial = ""
+endereco_padrao = "https://pje.tre-go.jus.br/pje/login.seam"
+hosts_autorizados = ["pje.tre-go.jus.br"]
+
+[[tribunal]]
+id = "trego"
+nome = "TRE-GO - 1o grau"
+sistema = "pje"
+ramo = "TRE"
+sigla = "TREGO"
+grau = "1G"
+grupo_credencial = ""
+endereco_padrao = "https://pje1g-go.tse.jus.br/pje/login.seam"
+hosts_autorizados = ["pje1g-go.tse.jus.br"]
+
+[[tribunal]]
+id = "trema-2g"
+nome = "TRE-MA - 2o grau"
+sistema = "pje"
+ramo = "TRE"
+sigla = "TREMA"
+grau = "2G"
+grupo_credencial = ""
+endereco_padrao = "https://pje.tre-ma.jus.br/pje/login.seam"
+hosts_autorizados = ["pje.tre-ma.jus.br"]
+
+[[tribunal]]
+id = "trema"
+nome = "TRE-MA - 1o grau"
+sistema = "pje"
+ramo = "TRE"
+sigla = "TREMA"
+grau = "1G"
+grupo_credencial = ""
+endereco_padrao = "https://pje1g-ma.tse.jus.br/pje/login.seam"
+hosts_autorizados = ["pje1g-ma.tse.jus.br"]
+
+[[tribunal]]
+id = "tremg-2g"
+nome = "TRE-MG - 2o grau"
+sistema = "pje"
+ramo = "TRE"
+sigla = "TREMG"
+grau = "2G"
+grupo_credencial = ""
+endereco_padrao = "https://pje.tre-mg.jus.br/pje/login.seam"
+hosts_autorizados = ["pje.tre-mg.jus.br"]
+
+[[tribunal]]
+id = "tremg"
+nome = "TRE-MG - 1o grau"
+sistema = "pje"
+ramo = "TRE"
+sigla = "TREMG"
+grau = "1G"
+grupo_credencial = ""
+endereco_padrao = "https://pje1g-mg.tse.jus.br/pje/login.seam"
+hosts_autorizados = ["pje1g-mg.tse.jus.br"]
+
+[[tribunal]]
+id = "trems-2g"
+nome = "TRE-MS - 2o grau"
+sistema = "pje"
+ramo = "TRE"
+sigla = "TREMS"
+grau = "2G"
+grupo_credencial = ""
+endereco_padrao = "https://pje.tre-ms.jus.br/pje/login.seam"
+hosts_autorizados = ["pje.tre-ms.jus.br"]
+
+[[tribunal]]
+id = "trems"
+nome = "TRE-MS - 1o grau"
+sistema = "pje"
+ramo = "TRE"
+sigla = "TREMS"
+grau = "1G"
+grupo_credencial = ""
+endereco_padrao = "https://pje1g-ms.tse.jus.br/pje/login.seam"
+hosts_autorizados = ["pje1g-ms.tse.jus.br"]
+
+[[tribunal]]
+id = "tremt-2g"
+nome = "TRE-MT - 2o grau"
+sistema = "pje"
+ramo = "TRE"
+sigla = "TREMT"
+grau = "2G"
+grupo_credencial = ""
+endereco_padrao = "https://pje.tre-mt.jus.br/pje/login.seam"
+hosts_autorizados = ["pje.tre-mt.jus.br"]
+
+[[tribunal]]
+id = "tremt"
+nome = "TRE-MT - 1o grau"
+sistema = "pje"
+ramo = "TRE"
+sigla = "TREMT"
+grau = "1G"
+grupo_credencial = ""
+endereco_padrao = "https://pje1g-mt.tse.jus.br/pje/login.seam"
+hosts_autorizados = ["pje1g-mt.tse.jus.br"]
+
+[[tribunal]]
+id = "trepa-2g"
+nome = "TRE-PA - 2o grau"
+sistema = "pje"
+ramo = "TRE"
+sigla = "TREPA"
+grau = "2G"
+grupo_credencial = ""
+endereco_padrao = "https://pje.tre-pa.jus.br/pje/login.seam"
+hosts_autorizados = ["pje.tre-pa.jus.br"]
+
+[[tribunal]]
+id = "trepa"
+nome = "TRE-PA - 1o grau"
+sistema = "pje"
+ramo = "TRE"
+sigla = "TREPA"
+grau = "1G"
+grupo_credencial = ""
+endereco_padrao = "https://pje1g-pa.tse.jus.br/pje/login.seam"
+hosts_autorizados = ["pje1g-pa.tse.jus.br"]
+
+[[tribunal]]
+id = "trepb-2g"
+nome = "TRE-PB - 2o grau"
+sistema = "pje"
+ramo = "TRE"
+sigla = "TREPB"
+grau = "2G"
+grupo_credencial = ""
+endereco_padrao = "https://pje.tre-pb.jus.br/pje/login.seam"
+hosts_autorizados = ["pje.tre-pb.jus.br"]
+
+[[tribunal]]
+id = "trepb"
+nome = "TRE-PB - 1o grau"
+sistema = "pje"
+ramo = "TRE"
+sigla = "TREPB"
+grau = "1G"
+grupo_credencial = ""
+endereco_padrao = "https://pje1g-pb.tse.jus.br/pje/login.seam"
+hosts_autorizados = ["pje1g-pb.tse.jus.br"]
+
+[[tribunal]]
+id = "trepe-2g"
+nome = "TRE-PE - 2o grau"
+sistema = "pje"
+ramo = "TRE"
+sigla = "TREPE"
+grau = "2G"
+grupo_credencial = ""
+endereco_padrao = "https://pje.tre-pe.jus.br/pje/login.seam"
+hosts_autorizados = ["pje.tre-pe.jus.br"]
+
+[[tribunal]]
+id = "trepe"
+nome = "TRE-PE - 1o grau"
+sistema = "pje"
+ramo = "TRE"
+sigla = "TREPE"
+grau = "1G"
+grupo_credencial = ""
+endereco_padrao = "https://pje1g-pe.tse.jus.br/pje/login.seam"
+hosts_autorizados = ["pje1g-pe.tse.jus.br"]
+
+[[tribunal]]
+id = "trepi-2g"
+nome = "TRE-PI - 2o grau"
+sistema = "pje"
+ramo = "TRE"
+sigla = "TREPI"
+grau = "2G"
+grupo_credencial = ""
+endereco_padrao = "https://pje.tre-pi.jus.br/pje/login.seam"
+hosts_autorizados = ["pje.tre-pi.jus.br"]
+
+[[tribunal]]
+id = "trepi"
+nome = "TRE-PI - 1o grau"
+sistema = "pje"
+ramo = "TRE"
+sigla = "TREPI"
+grau = "1G"
+grupo_credencial = ""
+endereco_padrao = "https://pje1g-pi.tse.jus.br/pje/login.seam"
+hosts_autorizados = ["pje1g-pi.tse.jus.br"]
+
+[[tribunal]]
+id = "trepr-2g"
+nome = "TRE-PR - 2o grau"
+sistema = "pje"
+ramo = "TRE"
+sigla = "TREPR"
+grau = "2G"
+grupo_credencial = ""
+endereco_padrao = "https://pje.tre-pr.jus.br/pje/login.seam"
+hosts_autorizados = ["pje.tre-pr.jus.br"]
+
+[[tribunal]]
+id = "trepr"
+nome = "TRE-PR - 1o grau"
+sistema = "pje"
+ramo = "TRE"
+sigla = "TREPR"
+grau = "1G"
+grupo_credencial = ""
+endereco_padrao = "https://pje1g-pr.tse.jus.br/pje/login.seam"
+hosts_autorizados = ["pje1g-pr.tse.jus.br"]
+
+[[tribunal]]
+id = "trerj-2g"
+nome = "TRE-RJ - 2o grau"
+sistema = "pje"
+ramo = "TRE"
+sigla = "TRERJ"
+grau = "2G"
+grupo_credencial = ""
+endereco_padrao = "https://pje.tre-rj.jus.br/pje/login.seam"
+hosts_autorizados = ["pje.tre-rj.jus.br"]
+
+[[tribunal]]
+id = "trerj"
+nome = "TRE-RJ - 1o grau"
+sistema = "pje"
+ramo = "TRE"
+sigla = "TRERJ"
+grau = "1G"
+grupo_credencial = ""
+endereco_padrao = "https://pje1g-rj.tse.jus.br/pje/login.seam"
+hosts_autorizados = ["pje1g-rj.tse.jus.br"]
+
+[[tribunal]]
+id = "trern-2g"
+nome = "TRE-RN - 2o grau"
+sistema = "pje"
+ramo = "TRE"
+sigla = "TRERN"
+grau = "2G"
+grupo_credencial = ""
+endereco_padrao = "https://pje.tre-rn.jus.br/pje/login.seam"
+hosts_autorizados = ["pje.tre-rn.jus.br"]
+
+[[tribunal]]
+id = "trern"
+nome = "TRE-RN - 1o grau"
+sistema = "pje"
+ramo = "TRE"
+sigla = "TRERN"
+grau = "1G"
+grupo_credencial = ""
+endereco_padrao = "https://pje1g-rn.tse.jus.br/pje/login.seam"
+hosts_autorizados = ["pje1g-rn.tse.jus.br"]
+
+[[tribunal]]
+id = "trero-2g"
+nome = "TRE-RO - 2o grau"
+sistema = "pje"
+ramo = "TRE"
+sigla = "TRERO"
+grau = "2G"
+grupo_credencial = ""
+endereco_padrao = "https://pje.tre-ro.jus.br/pje/login.seam"
+hosts_autorizados = ["pje.tre-ro.jus.br"]
+
+[[tribunal]]
+id = "trero"
+nome = "TRE-RO - 1o grau"
+sistema = "pje"
+ramo = "TRE"
+sigla = "TRERO"
+grau = "1G"
+grupo_credencial = ""
+endereco_padrao = "https://pje1g-ro.tse.jus.br/pje/login.seam"
+hosts_autorizados = ["pje1g-ro.tse.jus.br"]
+
+[[tribunal]]
+id = "trerr-2g"
+nome = "TRE-RR - 2o grau"
+sistema = "pje"
+ramo = "TRE"
+sigla = "TRERR"
+grau = "2G"
+grupo_credencial = ""
+endereco_padrao = "https://pje.tre-rr.jus.br/pje/login.seam"
+hosts_autorizados = ["pje.tre-rr.jus.br"]
+
+[[tribunal]]
+id = "trerr"
+nome = "TRE-RR - 1o grau"
+sistema = "pje"
+ramo = "TRE"
+sigla = "TRERR"
+grau = "1G"
+grupo_credencial = ""
+endereco_padrao = "https://pje1g-rr.tse.jus.br/pje/login.seam"
+hosts_autorizados = ["pje1g-rr.tse.jus.br"]
+
+[[tribunal]]
+id = "trers-2g"
+nome = "TRE-RS - 2o grau"
+sistema = "pje"
+ramo = "TRE"
+sigla = "TRERS"
+grau = "2G"
+grupo_credencial = ""
+endereco_padrao = "https://pje.tre-rs.jus.br/pje/login.seam"
+hosts_autorizados = ["pje.tre-rs.jus.br"]
+
+[[tribunal]]
+id = "trers"
+nome = "TRE-RS - 1o grau"
+sistema = "pje"
+ramo = "TRE"
+sigla = "TRERS"
+grau = "1G"
+grupo_credencial = ""
+endereco_padrao = "https://pje1g-rs.tse.jus.br/pje/login.seam"
+hosts_autorizados = ["pje1g-rs.tse.jus.br"]
+
+[[tribunal]]
+id = "tresc-2g"
+nome = "TRE-SC - 2o grau"
+sistema = "pje"
+ramo = "TRE"
+sigla = "TRESC"
+grau = "2G"
+grupo_credencial = ""
+endereco_padrao = "https://pje.tre-sc.jus.br/pje/login.seam"
+hosts_autorizados = ["pje.tre-sc.jus.br"]
+
+[[tribunal]]
+id = "tresc"
+nome = "TRE-SC - 1o grau"
+sistema = "pje"
+ramo = "TRE"
+sigla = "TRESC"
+grau = "1G"
+grupo_credencial = ""
+endereco_padrao = "https://pje1g-sc.tse.jus.br/pje/login.seam"
+hosts_autorizados = ["pje1g-sc.tse.jus.br"]
+
+[[tribunal]]
+id = "trese-2g"
+nome = "TRE-SE - 2o grau"
+sistema = "pje"
+ramo = "TRE"
+sigla = "TRESE"
+grau = "2G"
+grupo_credencial = ""
+endereco_padrao = "https://pje.tre-se.jus.br/pje/login.seam"
+hosts_autorizados = ["pje.tre-se.jus.br"]
+
+[[tribunal]]
+id = "trese"
+nome = "TRE-SE - 1o grau"
+sistema = "pje"
+ramo = "TRE"
+sigla = "TRESE"
+grau = "1G"
+grupo_credencial = ""
+endereco_padrao = "https://pje1g-se.tse.jus.br/pje/login.seam"
+hosts_autorizados = ["pje1g-se.tse.jus.br"]
+
+[[tribunal]]
+id = "tresp-2g"
+nome = "TRE-SP - 2o grau"
+sistema = "pje"
+ramo = "TRE"
+sigla = "TRESP"
+grau = "2G"
+grupo_credencial = ""
+endereco_padrao = "https://pje.tre-sp.jus.br/pje/login.seam"
+hosts_autorizados = ["pje.tre-sp.jus.br"]
+
+[[tribunal]]
+id = "tresp"
+nome = "TRE-SP - 1o grau"
+sistema = "pje"
+ramo = "TRE"
+sigla = "TRESP"
+grau = "1G"
+grupo_credencial = ""
+endereco_padrao = "https://pje1g-sp.tse.jus.br/pje/login.seam"
+hosts_autorizados = ["pje1g-sp.tse.jus.br"]
+
+[[tribunal]]
+id = "treto-2g"
+nome = "TRE-TO - 2o grau"
+sistema = "pje"
+ramo = "TRE"
+sigla = "TRETO"
+grau = "2G"
+grupo_credencial = ""
+endereco_padrao = "https://pje.tre-to.jus.br/pje/login.seam"
+hosts_autorizados = ["pje.tre-to.jus.br"]
+
+[[tribunal]]
+id = "treto"
+nome = "TRE-TO - 1o grau"
+sistema = "pje"
+ramo = "TRE"
+sigla = "TRETO"
+grau = "1G"
+grupo_credencial = ""
+endereco_padrao = "https://pje1g-to.tse.jus.br/pje/login.seam"
+hosts_autorizados = ["pje1g-to.tse.jus.br"]
+
+[[tribunal]]
+id = "trf1-2g"
+nome = "TRF1 - 2o grau"
+sistema = "pje"
+ramo = "TRF"
+sigla = "TRF1"
+grau = "2G"
+grupo_credencial = ""
+endereco_padrao = "https://pje2g.trf1.jus.br/pje/login.seam"
+hosts_autorizados = ["pje2g.trf1.jus.br"]
+
+[[tribunal]]
+id = "trf1"
+nome = "TRF1 - 1o grau"
+sistema = "pje"
+ramo = "TRF"
+sigla = "TRF1"
+grau = "1G"
+grupo_credencial = ""
+endereco_padrao = "https://pje1g.trf1.jus.br/pje/login.seam"
+hosts_autorizados = ["pje1g.trf1.jus.br"]
+
+[[tribunal]]
+id = "trf3-2g"
+nome = "TRF3 - 2o grau"
+sistema = "pje"
+ramo = "TRF"
+sigla = "TRF3"
+grau = "2G"
+grupo_credencial = ""
+endereco_padrao = "https://pje2g.trf3.jus.br/pje/login.seam"
+hosts_autorizados = ["pje2g.trf3.jus.br"]
+
+[[tribunal]]
+id = "trf3"
+nome = "TRF3 - 1o grau"
+sistema = "pje"
+ramo = "TRF"
+sigla = "TRF3"
+grau = "1G"
+grupo_credencial = ""
+endereco_padrao = "https://pje1g.trf3.jus.br/pje/login.seam"
+hosts_autorizados = ["pje1g.trf3.jus.br"]
+
+[[tribunal]]
+id = "trf5-jef"
+nome = "TRF5 - JEF 1o grau"
+sistema = "pje"
+ramo = "TRF"
+sigla = "TRF5"
+grau = "1G"
+grupo_credencial = ""
+endereco_padrao = "https://pje1g.trf5.jus.br/pje/login.seam"
+hosts_autorizados = ["pje1g.trf5.jus.br"]
+
+[[tribunal]]
+id = "trf5-jef2g"
+nome = "TRF5 - JEF Turmas Recursais"
+sistema = "pje"
+ramo = "TRF"
+sigla = "TRF5"
+grau = "2G"
+grupo_credencial = ""
+endereco_padrao = "https://pje2g.trf5.jus.br/pje/login.seam"
+hosts_autorizados = ["pje2g.trf5.jus.br"]
+
+[[tribunal]]
+id = "trf5-tru"
+nome = "TRF5 - TRU"
+sistema = "pje"
+ramo = "TRF"
+sigla = "TRF5"
+grau = ""
+grupo_credencial = ""
+endereco_padrao = "https://pjett.trf5.jus.br/pje/login.seam"
+hosts_autorizados = ["pjett.trf5.jus.br"]
+
+[[tribunal]]
+id = "trf5"
+nome = "TRF5 - PJe"
+sistema = "pje"
+ramo = "TRF"
+sigla = "TRF5"
+grau = ""
+grupo_credencial = ""
+endereco_padrao = "https://pje.trf5.jus.br/pje/login.seam"
+hosts_autorizados = ["pje.trf5.jus.br"]
+
+[[tribunal]]
+id = "trf6-2g"
+nome = "TRF6 - 2o grau"
+sistema = "pje"
+ramo = "TRF"
+sigla = "TRF6"
+grau = "2G"
+grupo_credencial = ""
+endereco_padrao = "https://pje2g.trf6.jus.br/pje/login.seam"
+hosts_autorizados = ["pje2g.trf6.jus.br"]
+
+[[tribunal]]
+id = "trf6"
+nome = "TRF6 - 1o grau"
+sistema = "pje"
+ramo = "TRF"
+sigla = "TRF6"
+grau = "1G"
+grupo_credencial = ""
+endereco_padrao = "https://pje1g.trf6.jus.br/pje/login.seam"
+hosts_autorizados = ["pje1g.trf6.jus.br"]
+
+[[tribunal]]
+id = "trt1-2g"
+nome = "TRT1 - 2o grau"
+sistema = "pje"
+ramo = "TRT"
+sigla = "TRT1"
+grau = "2G"
+grupo_credencial = "TRT1"
+endereco_padrao = "https://pje.trt1.jus.br/segundograu/login.seam"
+hosts_autorizados = ["pje.trt1.jus.br"]
+
+[[tribunal]]
+id = "trt1"
+nome = "TRT1 - 1o grau"
+sistema = "pje"
+ramo = "TRT"
+sigla = "TRT1"
+grau = "1G"
+grupo_credencial = "TRT1"
+endereco_padrao = "https://pje.trt1.jus.br/primeirograu/login.seam"
+hosts_autorizados = ["pje.trt1.jus.br"]
+
+[[tribunal]]
+id = "trt10-2g"
+nome = "TRT10 - 2o grau"
+sistema = "pje"
+ramo = "TRT"
+sigla = "TRT10"
+grau = "2G"
+grupo_credencial = "TRT10"
+endereco_padrao = "https://pje.trt10.jus.br/segundograu/login.seam"
+hosts_autorizados = ["pje.trt10.jus.br"]
+
+[[tribunal]]
+id = "trt10"
+nome = "TRT10 - 1o grau"
+sistema = "pje"
+ramo = "TRT"
+sigla = "TRT10"
+grau = "1G"
+grupo_credencial = "TRT10"
+endereco_padrao = "https://pje.trt10.jus.br/primeirograu/login.seam"
+hosts_autorizados = ["pje.trt10.jus.br"]
+
+[[tribunal]]
+id = "trt11-2g"
+nome = "TRT11 - 2o grau"
+sistema = "pje"
+ramo = "TRT"
+sigla = "TRT11"
+grau = "2G"
+grupo_credencial = "TRT11"
+endereco_padrao = "https://pje.trt11.jus.br/segundograu/login.seam"
+hosts_autorizados = ["pje.trt11.jus.br"]
+
+[[tribunal]]
+id = "trt11"
+nome = "TRT11 - 1o grau"
+sistema = "pje"
+ramo = "TRT"
+sigla = "TRT11"
+grau = "1G"
+grupo_credencial = "TRT11"
+endereco_padrao = "https://pje.trt11.jus.br/primeirograu/login.seam"
+hosts_autorizados = ["pje.trt11.jus.br"]
+
+[[tribunal]]
+id = "trt12-2g"
+nome = "TRT12 - 2o grau"
+sistema = "pje"
+ramo = "TRT"
+sigla = "TRT12"
+grau = "2G"
+grupo_credencial = "TRT12"
+endereco_padrao = "https://pje.trt12.jus.br/segundograu/login.seam"
+hosts_autorizados = ["pje.trt12.jus.br"]
+
+[[tribunal]]
+id = "trt12"
+nome = "TRT12 - 1o grau"
+sistema = "pje"
+ramo = "TRT"
+sigla = "TRT12"
+grau = "1G"
+grupo_credencial = "TRT12"
+endereco_padrao = "https://pje.trt12.jus.br/primeirograu/login.seam"
+hosts_autorizados = ["pje.trt12.jus.br"]
+
+[[tribunal]]
+id = "trt13-2g"
+nome = "TRT13 - 2o grau"
+sistema = "pje"
+ramo = "TRT"
+sigla = "TRT13"
+grau = "2G"
+grupo_credencial = "TRT13"
+endereco_padrao = "https://pje.trt13.jus.br/segundograu/login.seam"
+hosts_autorizados = ["pje.trt13.jus.br"]
+
+[[tribunal]]
+id = "trt13"
+nome = "TRT13 - 1o grau"
+sistema = "pje"
+ramo = "TRT"
+sigla = "TRT13"
+grau = "1G"
+grupo_credencial = "TRT13"
+endereco_padrao = "https://pje.trt13.jus.br/primeirograu/login.seam"
+hosts_autorizados = ["pje.trt13.jus.br"]
+
+[[tribunal]]
+id = "trt14-2g"
+nome = "TRT14 - 2o grau"
+sistema = "pje"
+ramo = "TRT"
+sigla = "TRT14"
+grau = "2G"
+grupo_credencial = "TRT14"
+endereco_padrao = "https://pje.trt14.jus.br/segundograu/login.seam"
+hosts_autorizados = ["pje.trt14.jus.br"]
+
+[[tribunal]]
+id = "trt14"
+nome = "TRT14 - 1o grau"
+sistema = "pje"
+ramo = "TRT"
+sigla = "TRT14"
+grau = "1G"
+grupo_credencial = "TRT14"
+endereco_padrao = "https://pje.trt14.jus.br/primeirograu/login.seam"
+hosts_autorizados = ["pje.trt14.jus.br"]
+
+[[tribunal]]
+id = "trt15-2g"
+nome = "TRT15 - 2o grau"
+sistema = "pje"
+ramo = "TRT"
+sigla = "TRT15"
+grau = "2G"
+grupo_credencial = "TRT15"
+endereco_padrao = "https://pje.trt15.jus.br/segundograu/login.seam"
+hosts_autorizados = ["pje.trt15.jus.br"]
+
+[[tribunal]]
+id = "trt15"
+nome = "TRT15 - 1o grau"
+sistema = "pje"
+ramo = "TRT"
+sigla = "TRT15"
+grau = "1G"
+grupo_credencial = "TRT15"
+endereco_padrao = "https://pje.trt15.jus.br/primeirograu/login.seam"
+hosts_autorizados = ["pje.trt15.jus.br"]
+
+[[tribunal]]
+id = "trt16-2g"
+nome = "TRT16 - 2o grau"
+sistema = "pje"
+ramo = "TRT"
+sigla = "TRT16"
+grau = "2G"
+grupo_credencial = "TRT16"
+endereco_padrao = "https://pje.trt16.jus.br/segundograu/login.seam"
+hosts_autorizados = ["pje.trt16.jus.br"]
+
+[[tribunal]]
+id = "trt16"
+nome = "TRT16 - 1o grau"
+sistema = "pje"
+ramo = "TRT"
+sigla = "TRT16"
+grau = "1G"
+grupo_credencial = "TRT16"
+endereco_padrao = "https://pje.trt16.jus.br/primeirograu/login.seam"
+hosts_autorizados = ["pje.trt16.jus.br"]
+
+[[tribunal]]
+id = "trt17-2g"
+nome = "TRT17 - 2o grau"
+sistema = "pje"
+ramo = "TRT"
+sigla = "TRT17"
+grau = "2G"
+grupo_credencial = "TRT17"
+endereco_padrao = "https://pje.trt17.jus.br/segundograu/login.seam"
+hosts_autorizados = ["pje.trt17.jus.br"]
+
+[[tribunal]]
+id = "trt17"
+nome = "TRT17 - 1o grau"
+sistema = "pje"
+ramo = "TRT"
+sigla = "TRT17"
+grau = "1G"
+grupo_credencial = "TRT17"
+endereco_padrao = "https://pje.trt17.jus.br/primeirograu/login.seam"
+hosts_autorizados = ["pje.trt17.jus.br"]
+
+[[tribunal]]
+id = "trt18-2g"
+nome = "TRT18 - 2o grau"
+sistema = "pje"
+ramo = "TRT"
+sigla = "TRT18"
+grau = "2G"
+grupo_credencial = "TRT18"
+endereco_padrao = "https://pje.trt18.jus.br/segundograu/login.seam"
+hosts_autorizados = ["pje.trt18.jus.br"]
+
+[[tribunal]]
+id = "trt18"
+nome = "TRT18 - 1o grau"
+sistema = "pje"
+ramo = "TRT"
+sigla = "TRT18"
+grau = "1G"
+grupo_credencial = "TRT18"
+endereco_padrao = "https://pje.trt18.jus.br/primeirograu/login.seam"
+hosts_autorizados = ["pje.trt18.jus.br"]
+
+[[tribunal]]
+id = "trt19-2g"
+nome = "TRT19 - 2o grau"
+sistema = "pje"
+ramo = "TRT"
+sigla = "TRT19"
+grau = "2G"
+grupo_credencial = "TRT19"
+endereco_padrao = "https://pje.trt19.jus.br/segundograu/login.seam"
+hosts_autorizados = ["pje.trt19.jus.br"]
+
+[[tribunal]]
+id = "trt19"
+nome = "TRT19 - 1o grau"
+sistema = "pje"
+ramo = "TRT"
+sigla = "TRT19"
+grau = "1G"
+grupo_credencial = "TRT19"
+endereco_padrao = "https://pje.trt19.jus.br/primeirograu/login.seam"
+hosts_autorizados = ["pje.trt19.jus.br"]
+
+[[tribunal]]
+id = "trt2-2g"
+nome = "TRT2 - 2o grau"
+sistema = "pje"
+ramo = "TRT"
+sigla = "TRT2"
+grau = "2G"
+grupo_credencial = "TRT2"
+endereco_padrao = "https://pje.trt2.jus.br/segundograu/login.seam"
+hosts_autorizados = ["pje.trt2.jus.br"]
+
+[[tribunal]]
+id = "trt2"
+nome = "TRT2 - 1o grau"
+sistema = "pje"
+ramo = "TRT"
+sigla = "TRT2"
+grau = "1G"
+grupo_credencial = "TRT2"
+endereco_padrao = "https://pje.trt2.jus.br/primeirograu/login.seam"
+hosts_autorizados = ["pje.trt2.jus.br"]
+
+[[tribunal]]
+id = "trt20-2g"
+nome = "TRT20 - 2o grau"
+sistema = "pje"
+ramo = "TRT"
+sigla = "TRT20"
+grau = "2G"
+grupo_credencial = "TRT20"
+endereco_padrao = "https://pje.trt20.jus.br/segundograu/login.seam"
+hosts_autorizados = ["pje.trt20.jus.br"]
+
+[[tribunal]]
+id = "trt20"
+nome = "TRT20 - 1o grau"
+sistema = "pje"
+ramo = "TRT"
+sigla = "TRT20"
+grau = "1G"
+grupo_credencial = "TRT20"
+endereco_padrao = "https://pje.trt20.jus.br/primeirograu/login.seam"
+hosts_autorizados = ["pje.trt20.jus.br"]
+
+[[tribunal]]
+id = "trt21-2g"
+nome = "TRT21 - 2o grau"
+sistema = "pje"
+ramo = "TRT"
+sigla = "TRT21"
+grau = "2G"
+grupo_credencial = "TRT21"
+endereco_padrao = "https://pje.trt21.jus.br/segundograu/login.seam"
+hosts_autorizados = ["pje.trt21.jus.br"]
+
+[[tribunal]]
+id = "trt21"
+nome = "TRT21 - 1o grau"
+sistema = "pje"
+ramo = "TRT"
+sigla = "TRT21"
+grau = "1G"
+grupo_credencial = "TRT21"
+endereco_padrao = "https://pje.trt21.jus.br/primeirograu/login.seam"
+hosts_autorizados = ["pje.trt21.jus.br"]
+
+[[tribunal]]
+id = "trt22-2g"
+nome = "TRT22 - 2o grau"
+sistema = "pje"
+ramo = "TRT"
+sigla = "TRT22"
+grau = "2G"
+grupo_credencial = "TRT22"
+endereco_padrao = "https://pje.trt22.jus.br/segundograu/login.seam"
+hosts_autorizados = ["pje.trt22.jus.br"]
+
+[[tribunal]]
+id = "trt22"
+nome = "TRT22 - 1o grau"
+sistema = "pje"
+ramo = "TRT"
+sigla = "TRT22"
+grau = "1G"
+grupo_credencial = "TRT22"
+endereco_padrao = "https://pje.trt22.jus.br/primeirograu/login.seam"
+hosts_autorizados = ["pje.trt22.jus.br"]
+
+[[tribunal]]
+id = "trt23-2g"
+nome = "TRT23 - 2o grau"
+sistema = "pje"
+ramo = "TRT"
+sigla = "TRT23"
+grau = "2G"
+grupo_credencial = "TRT23"
+endereco_padrao = "https://pje.trt23.jus.br/segundograu/login.seam"
+hosts_autorizados = ["pje.trt23.jus.br"]
+
+[[tribunal]]
+id = "trt23"
+nome = "TRT23 - 1o grau"
+sistema = "pje"
+ramo = "TRT"
+sigla = "TRT23"
+grau = "1G"
+grupo_credencial = "TRT23"
+endereco_padrao = "https://pje.trt23.jus.br/primeirograu/login.seam"
+hosts_autorizados = ["pje.trt23.jus.br"]
+
+[[tribunal]]
+id = "trt24-2g"
+nome = "TRT24 - 2o grau"
+sistema = "pje"
+ramo = "TRT"
+sigla = "TRT24"
+grau = "2G"
+grupo_credencial = "TRT24"
+endereco_padrao = "https://pje.trt24.jus.br/segundograu/login.seam"
+hosts_autorizados = ["pje.trt24.jus.br"]
+
+[[tribunal]]
+id = "trt24"
+nome = "TRT24 - 1o grau"
+sistema = "pje"
+ramo = "TRT"
+sigla = "TRT24"
+grau = "1G"
+grupo_credencial = "TRT24"
+endereco_padrao = "https://pje.trt24.jus.br/primeirograu/login.seam"
+hosts_autorizados = ["pje.trt24.jus.br"]
+
+[[tribunal]]
+id = "trt3-2g"
+nome = "TRT3 - 2o grau"
+sistema = "pje"
+ramo = "TRT"
+sigla = "TRT3"
+grau = "2G"
+grupo_credencial = "TRT3"
+endereco_padrao = "https://pje.trt3.jus.br/segundograu/login.seam"
+hosts_autorizados = ["pje.trt3.jus.br"]
+
+[[tribunal]]
+id = "trt3"
+nome = "TRT3 - 1o grau"
+sistema = "pje"
+ramo = "TRT"
+sigla = "TRT3"
+grau = "1G"
+grupo_credencial = "TRT3"
+endereco_padrao = "https://pje.trt3.jus.br/primeirograu/login.seam"
+hosts_autorizados = ["pje.trt3.jus.br"]
+
+[[tribunal]]
+id = "trt4-2g"
+nome = "TRT4 - 2o grau"
+sistema = "pje"
+ramo = "TRT"
+sigla = "TRT4"
+grau = "2G"
+grupo_credencial = "TRT4"
+endereco_padrao = "https://pje.trt4.jus.br/segundograu/login.seam"
+hosts_autorizados = ["pje.trt4.jus.br"]
+
+[[tribunal]]
+id = "trt4"
+nome = "TRT4 - 1o grau"
+sistema = "pje"
+ramo = "TRT"
+sigla = "TRT4"
+grau = "1G"
+grupo_credencial = "TRT4"
+endereco_padrao = "https://pje.trt4.jus.br/primeirograu/login.seam"
+hosts_autorizados = ["pje.trt4.jus.br"]
+
+[[tribunal]]
+id = "trt5-2g"
+nome = "TRT5 - 2o grau"
+sistema = "pje"
+ramo = "TRT"
+sigla = "TRT5"
+grau = "2G"
+grupo_credencial = "TRT5"
+endereco_padrao = "https://pje.trt5.jus.br/segundograu/login.seam"
+hosts_autorizados = ["pje.trt5.jus.br"]
+
+[[tribunal]]
+id = "trt5"
+nome = "TRT5 - 1o grau"
+sistema = "pje"
+ramo = "TRT"
+sigla = "TRT5"
+grau = "1G"
+grupo_credencial = "TRT5"
+endereco_padrao = "https://pje.trt5.jus.br/primeirograu/login.seam"
+hosts_autorizados = ["pje.trt5.jus.br"]
+
+[[tribunal]]
+id = "trt6-2g"
+nome = "TRT6 - 2o grau"
+sistema = "pje"
+ramo = "TRT"
+sigla = "TRT6"
+grau = "2G"
+grupo_credencial = "TRT6"
+endereco_padrao = "https://pje.trt6.jus.br/segundograu/login.seam"
+hosts_autorizados = ["pje.trt6.jus.br"]
+
+[[tribunal]]
+id = "trt6"
+nome = "TRT6 - 1o grau"
+sistema = "pje"
+ramo = "TRT"
+sigla = "TRT6"
+grau = "1G"
+grupo_credencial = "TRT6"
+endereco_padrao = "https://pje.trt6.jus.br/primeirograu/login.seam"
+hosts_autorizados = ["pje.trt6.jus.br"]
+
+[[tribunal]]
+id = "trt7-2g"
+nome = "TRT7 - 2o grau"
+sistema = "pje"
+ramo = "TRT"
+sigla = "TRT7"
+grau = "2G"
+grupo_credencial = "TRT7"
+endereco_padrao = "https://pje.trt7.jus.br/segundograu/login.seam"
+hosts_autorizados = ["pje.trt7.jus.br"]
+
+[[tribunal]]
+id = "trt7"
+nome = "TRT7 - 1o grau"
+sistema = "pje"
+ramo = "TRT"
+sigla = "TRT7"
+grau = "1G"
+grupo_credencial = "TRT7"
+endereco_padrao = "https://pje.trt7.jus.br/primeirograu/login.seam"
+hosts_autorizados = ["pje.trt7.jus.br"]
+
+[[tribunal]]
+id = "trt8-2g"
+nome = "TRT8 - 2o grau"
+sistema = "pje"
+ramo = "TRT"
+sigla = "TRT8"
+grau = "2G"
+grupo_credencial = "TRT8"
+endereco_padrao = "https://pje.trt8.jus.br/segundograu/login.seam"
+hosts_autorizados = ["pje.trt8.jus.br"]
+
+[[tribunal]]
+id = "trt8"
+nome = "TRT8 - 1o grau"
+sistema = "pje"
+ramo = "TRT"
+sigla = "TRT8"
+grau = "1G"
+grupo_credencial = "TRT8"
+endereco_padrao = "https://pje.trt8.jus.br/primeirograu/login.seam"
+hosts_autorizados = ["pje.trt8.jus.br"]
+
+[[tribunal]]
+id = "trt9-2g"
+nome = "TRT9 - 2o grau"
+sistema = "pje"
+ramo = "TRT"
+sigla = "TRT9"
+grau = "2G"
+grupo_credencial = "TRT9"
+endereco_padrao = "https://pje.trt9.jus.br/segundograu/login.seam"
+hosts_autorizados = ["pje.trt9.jus.br"]
+
+[[tribunal]]
+id = "trt9"
+nome = "TRT9 - 1o grau"
+sistema = "pje"
+ramo = "TRT"
+sigla = "TRT9"
+grau = "1G"
+grupo_credencial = "TRT9"
+endereco_padrao = "https://pje.trt9.jus.br/primeirograu/login.seam"
+hosts_autorizados = ["pje.trt9.jus.br"]
+
+[[tribunal]]
+id = "tse"
+nome = "TSE"
+sistema = "pje"
+ramo = "TSE"
+sigla = "TSE"
+grau = "2G"
+grupo_credencial = ""
+endereco_padrao = "https://pje.tse.jus.br/pje/login.seam"
+hosts_autorizados = ["pje.tse.jus.br"]
+
+[[tribunal]]
+id = "tst"
+nome = "TST"
+sistema = "pje"
+ramo = "TST"
+sigla = "TST"
+grau = "2G"
+grupo_credencial = ""
+endereco_padrao = "https://pje.tst.jus.br/tst/login.seam"
+hosts_autorizados = ["pje.tst.jus.br"]

@@ -27,14 +27,39 @@ PLANILHA_PADRAO = Path("planilhas") / "advogados.xlsx"
 # --------------------------------------------------------------- escolha do tribunal
 @dataclass
 class OpcaoTribunal:
-    chave: str          # nome do arquivo (ex.: tjap)
+    chave: str          # id do tribunal = nome do arquivo (ex.: tjap); identidade permanente
     caminho: Path
     nome: str           # ex.: TJAP - 1o grau
-    liberado: bool      # envio real liberado no .toml
-    url: str = ""       # endereco de login (define a regra dos dois graus, ver graus.py)
+    liberado: bool      # envio real liberado no .toml E endereco aprovado (enderecos.py)
+    url: str = ""       # endereco de navegacao: so para exibir e navegar, nunca para regras
+    grau: str = ""      # identidade (registro.py): "1G", "2G" ou ""
+    grupo_credencial: str = ""  # identidade: tribunais com uma credencial so (graus.py)
+    ramo: str = ""
+    problemas: list[str] = field(default_factory=list)  # endereco invalido: nao navega
+    pendencia: str = ""  # por que o envio real nao esta liberado ('' = nada pendente)
+
+    @property
+    def tribunal_id(self) -> str:
+        return self.chave
 
 
-def listar_tribunais(pasta: Path = PASTA_TRIBUNAIS) -> list[OpcaoTribunal]:
+def opcao_de(path: Path, cfg: AppConfig) -> OpcaoTribunal:
+    from . import enderecos
+
+    problemas = enderecos.problemas(cfg)
+    pendencia = ""
+    if not (cfg.selectors_approved and cfg.allow_live_submission):
+        pendencia = "envio real nao liberado no .toml (selectors_approved e allow_live_submission)"
+    elif problemas or not enderecos.aprovado_para_envio_real(cfg):
+        pendencia = enderecos.pendencia_do_envio_real(cfg)
+    return OpcaoTribunal(path.stem, path, cfg.tribunal, not pendencia, cfg.base_url, cfg.grau,
+                         cfg.grupo_credencial, cfg.ramo, problemas, pendencia)
+
+
+def listar_tribunais(pasta: Path = PASTA_TRIBUNAIS, erros: list[str] | None = None) -> list[OpcaoTribunal]:
+    """Tribunais configurados em tribunais\\. Arquivo com erro (TOML, identidade fora do registro,
+    registro invalido) fica de fora da lista e o motivo vai para `erros` (quando a lista e passada),
+    para o operador ver: nada e descartado em silencio."""
     from .config import load_config
 
     opcoes = []
@@ -43,11 +68,22 @@ def listar_tribunais(pasta: Path = PASTA_TRIBUNAIS) -> list[OpcaoTribunal]:
             continue
         try:
             cfg = load_config(path)
-        except Exception:  # noqa: BLE001 - arquivo quebrado nao derruba a lista
+        except Exception as exc:  # noqa: BLE001 - arquivo quebrado nao derruba a lista
+            if erros is not None:
+                erros.append(f"{path.name}: {type(exc).__name__}: {exc}")
             continue
-        opcoes.append(OpcaoTribunal(path.stem, path, cfg.tribunal,
-                                    cfg.selectors_approved and cfg.allow_live_submission, cfg.base_url))
+        opcoes.append(opcao_de(path, cfg))
     return opcoes
+
+
+def avisar_problemas(opcoes: list[OpcaoTribunal], erros: list[str], log) -> None:
+    """Mostra arquivos ignorados e enderecos recusados (nada some em silencio)."""
+    for erro in erros:
+        log("ATENCAO: tribunal ignorado - " + erro)
+    for o in opcoes:
+        if o.problemas:
+            log(f"ATENCAO: {o.chave}: endereco de login recusado ({'; '.join(o.problemas)}). "
+                "Esse tribunal nao sera acessado ate o endereco ser corrigido no .toml.")
 
 
 def escolher_tribunal(opcoes: list[OpcaoTribunal], resposta: str) -> OpcaoTribunal | None:
@@ -248,7 +284,7 @@ def processar_advogado(config: AppConfig, linha, audit_root: Path, deps: Depende
                              nova_senha_se_ja_cadastrado=nova_senha_se_ja_cadastrado,
                              senha_do_outro_grau=senha_do_outro_grau, mostrar_cabecalho=mostrar_cabecalho)
 
-    falta = exigencias.faltando(config.base_url, linha.record)
+    falta = exigencias.faltando(config, linha.record)
     if falta:
         cabecalho()
         motivo = (f"este tribunal exige {' e '.join(falta)} no cadastro e a planilha esta sem. "
@@ -263,7 +299,7 @@ def processar_advogado(config: AppConfig, linha, audit_root: Path, deps: Depende
             cabecalho()
             deps.log(motivo)
             return ResultadoAdvogado(linha.numero_linha, linha.nome, "JA_FEITO", motivo)
-    nome_grupo = graus.grupo(config.base_url)
+    nome_grupo = graus.grupo(config)
     feitos = deps.cache.setdefault(linha.numero_linha, {}).setdefault("graus", {})
     anterior = feitos.get(nome_grupo) if nome_grupo else None
     if anterior is not None and not anterior.get("pronto", bool(anterior["senha"])):
@@ -451,7 +487,7 @@ def _credencial_por_certificado(config, record, deps: Dependencias, res, resulta
     res.credencial = LinhaCredencial(
         config.tribunal, config.base_url, record.nome_esperado, record.cpf_esperado, record.email,
         chave_2fa=secret_2fa if deps.opcoes.chave_na_planilha else "", login_testado=conferido,
-        por_certificado=True, observacao=detalhe)
+        por_certificado=True, observacao=detalhe, tribunal_id=getattr(config, "tribunal_id", ""))
     if conferido:
         deps.log("2/2 Credencial: certificado A1 + 2FA (sem senha). Login conferido: " + detalhe + ".")
     else:
@@ -475,7 +511,8 @@ def _etapa_senha(config, linha, audit_root: Path, deps: Dependencias, res, cache
         deps.log("PENDENTE: caixa de e-mail sem acesso (" + inbox.motivo + "). Pedido de senha NAO enviado ao PJe.")
         res.credencial = LinhaCredencial(config.tribunal, config.base_url, record.nome_esperado,
                                          record.cpf_esperado, record.email,
-                                         observacao="PENDENTE - e-mail: " + inbox.motivo)
+                                         observacao="PENDENTE - e-mail: " + inbox.motivo,
+                                         tribunal_id=getattr(config, "tribunal_id", ""))
         return res
     lawyer = {"nome": record.nome_esperado, "cpf": record.cpf_esperado, "email": record.email,
               "chave_2fa_exibir": secret_2fa if deps.opcoes.chave_na_planilha else ""}
@@ -570,9 +607,15 @@ def executar_lote(config: AppConfig, linhas: list, audit_root: Path, saida: Path
         for i, linha in enumerate(linhas, start=1):
             deps.log(f"\n[{i}/{len(linhas)}]")
             try:
-                resultados.append(processar_advogado(
+                resultado = processar_advogado(
                     config, linha, audit_root, deps, rehearsal=rehearsal,
-                    nova_senha_se_ja_cadastrado=nova_senha_se_ja_cadastrado))
+                    nova_senha_se_ja_cadastrado=nova_senha_se_ja_cadastrado)
+                credencial = getattr(resultado, "credencial", None)
+                if credencial is not None:  # toda credencial sai com a identidade do tribunal
+                    for campo in ("tribunal_id", "grau"):
+                        if not getattr(credencial, campo, ""):
+                            setattr(credencial, campo, getattr(config, campo, ""))
+                resultados.append(resultado)
             except KeyboardInterrupt:
                 raise
             except Exception as exc:  # noqa: BLE001 - um advogado com problema nao para o lote
@@ -707,6 +750,13 @@ def _escolher(opcoes: list[OpcaoTribunal], tribunal: str, deps: Dependencias) ->
             log("Nao reconhecido(s): " + ", ".join(invalidos) + ". Tente de novo.")
             escolhidos = []
     escolhidos, incluidos, incompletos = graus.completar(escolhidos, opcoes)
+    recusados = [o for o in escolhidos if o.problemas]
+    for o in recusados:
+        log(f"{o.nome} ficou de fora: endereco de login recusado ({'; '.join(o.problemas)}). Nada sera acessado nele.")
+    if recusados:
+        escolhidos, fora = graus.so_grupos_inteiros([o for o in escolhidos if not o.problemas])
+        for nome_grupo in fora:
+            log(f"Regra dos dois graus: {nome_grupo} ficou de fora, o outro grau tem endereco recusado.")
     for nome in incluidos:
         log(f"Regra dos dois graus: incluido {nome} (cadastro e senha sao feitos nos dois graus).")
     for nome_grupo in incompletos:
@@ -736,7 +786,11 @@ def _definir_modo(escolhidos: list[OpcaoTribunal], ensaio: bool | None,
             ensaio = not deps.yes("Executar em modo REAL (cadastra, assina o termo e cria a senha)?", True)
     if not ensaio and nao_liberados:
         log("Envio real NAO liberado em: " + ", ".join(o.nome for o in nao_liberados))
-        log("Para liberar: selectors_approved = true e allow_live_submission = true no .toml do tribunal.")
+        for o in nao_liberados:
+            if o.pendencia:
+                log(f"  - {o.chave}: {o.pendencia}")
+        log("Para liberar: selectors_approved = true e allow_live_submission = true no .toml do tribunal "
+            "(e, se o endereco mudou, aprove-o: python -m pje_rpa enderecos --aprovar <id>).")
         if len(nao_liberados) == len(escolhidos) or not deps.yes(
                 "Seguir so com os tribunais liberados (os outros ficam de fora)?", True):
             log("Cancelado. Rode em ensaio ou libere os tribunais.")
@@ -843,7 +897,9 @@ def run_executar(audit_root: Path = Path("runtime/audit"), saida: Path = Path("e
         ensaio = False
         log("SO SENHA: sem login com certificado. Use apenas para tribunais onde o advogado JA tem cadastro.")
 
-    opcoes = listar_tribunais()
+    erros: list[str] = []
+    opcoes = listar_tribunais(erros=erros)
+    avisar_problemas(opcoes, erros, log)
     if not opcoes:
         log("Nenhum tribunal configurado em tribunais\\")
         return 2
@@ -865,7 +921,7 @@ def run_executar(audit_root: Path = Path("runtime/audit"), saida: Path = Path("e
 
     for c in configs:
         for l in participantes(c, validas, deps):
-            falta = exigencias.faltando(c.base_url, l.record)
+            falta = exigencias.faltando(c, l.record)
             if falta:
                 log(f"  ATENCAO linha {l.numero_linha}: sem {' e '.join(falta)}, exigido em {c.tribunal}. "
                     "A linha sera pulada nesse tribunal.")

@@ -77,6 +77,12 @@ def build_parser() -> argparse.ArgumentParser:
     tela.add_argument("--planilha", default="", help="Planilha com o advogado cujo certificado sera usado")
     tela.add_argument("--linha", type=int, default=0, help="Linha do advogado na planilha (se houver mais de um)")
 
+    ends = sub.add_parser("enderecos", help="Confere a identidade e o endereco de login de cada tribunal; aprova "
+                                            "um endereco alterado para o envio real")
+    ends.add_argument("--aprovar", default="", metavar="ID", help="id do tribunal (ex.: tjes-2g)")
+    ends.add_argument("--sim", action="store_true", help="Nao pergunta a confirmacao (use so depois de conferir)")
+    ends.add_argument("--pasta", type=Path, default=Path("tribunais"))
+
     report = sub.add_parser("relatorio", help="Resume os resultados por tribunal e confere a meta de validacao")
     report.add_argument("--audit-root", type=Path, default=Path("runtime/audit"))
     report.add_argument("--meta", type=int, default=5, help="Minimo de tribunais com cadastro real")
@@ -138,6 +144,13 @@ def main(argv: list[str] | None = None) -> int:
         if args.command == "mapear-tela":
             from .mapeamento import run_mapear_tela
             return run_mapear_tela(args.tribunal, args.planilha, args.linha)
+        if args.command == "enderecos":
+            from .enderecos import aprovar, conferir
+            if args.aprovar:
+                def confirmar(pergunta: str) -> bool:
+                    return args.sim or input(pergunta + " (s/N): ").strip().casefold() in ("s", "sim")
+                return aprovar(args.pasta, args.aprovar.strip(), confirmar)
+            return conferir(args.pasta)
         if args.command == "relatorio":
             from .tribunais import format_relatorio, relatorio
             data = relatorio(args.audit_root, args.meta)

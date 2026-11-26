@@ -297,3 +297,27 @@ quem navega e o operador.
   mesmo e tecle Enter; o robo le os avisos (inclusive as janelas de alerta, que ele so fecha). Com o
   e-mail vazio o tribunal recusa. Para terminar sem isso, digite F.
 - A saida vai para as mesmas tabelas do mapeamento do PJe, com a situacao MAPEADO_ASSISTIDO.
+
+## 11. Identidade do tribunal x endereco de login
+
+Cada tribunal tem uma identidade permanente em `tribunais\_registro.toml` (fonte unica): `id` (= nome
+do arquivo .toml), nome, ramo, grau (1G/2G) e `grupo_credencial` (os dois graus de cada TRT). Regras de
+credencial (dois graus), exigencias da planilha, pedidos e entregas usam essa identidade. O `base_url`
+do .toml so diz onde o robo comeca a navegar. Detalhes: `docs\identidade-dos-tribunais.md`.
+
+```powershell
+.\.venv\Scripts\python.exe -m pje_rpa enderecos                    # identidade + situacao do endereco de cada tribunal
+.\.venv\Scripts\python.exe -m pje_rpa enderecos --aprovar tjes-2g   # libera um endereco alterado para o envio real
+```
+
+- O tribunal mudou de endereco oficial: troque `base_url` no .toml. Se o host mudou, acrescente o novo
+  em `hosts_autorizados` do registro. O ensaio ja funciona; o envio real so depois de
+  `enderecos --aprovar <id>` (grava `endereco_aprovado` no .toml e registra em
+  `runtime\audit\enderecos-aprovados.jsonl`). Pedidos, credenciais e historico nao mudam.
+- Endereco recusado (host fora da lista, login unificado `sso.cloud.pje.jus.br`, parametros de sessao
+  como `state`/`code`, porta, usuario na URL): o tribunal nao e acessado nem no ensaio, e o motivo
+  aparece na lista. Para voltar ao endereco oficial: `git checkout -- tribunais\<id>.toml`.
+- Arquivo .toml com erro (TOML invalido, fora do registro, identidade em conflito) nao some mais em
+  silencio: aparece como "ATENCAO: tribunal ignorado" no executar, no mapear e em `enderecos`.
+- Tribunal novo: acrescente um `[[tribunal]]` no registro (ou uma secao `[tribunal]` no proprio .toml,
+  que nao e herdada por `herda`).

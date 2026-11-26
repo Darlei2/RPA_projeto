@@ -13,8 +13,10 @@ from pathlib import Path
 COLUNAS = [
     "Tribunal", "Endereco de login", "Advogado", "CPF (usuario)", "E-mail cadastrado",
     "Senha", "Chave 2FA (TOTP)", "Senha cadastrada", "Login CPF+senha+2FA testado",
-    "Data/hora", "Observacao",
+    "Data/hora", "Observacao", "ID do tribunal", "Grau",
 ]
+# "ID do tribunal" (registro.py) e a identidade permanente: quem le a planilha (integracoes, historico)
+# reconhece o tribunal por ela. "Endereco de login" fica so como informacao (onde o robo navegou).
 
 
 @dataclass
@@ -32,13 +34,15 @@ class LinhaCredencial:
     quando: datetime = field(default_factory=datetime.now)
     observacao: str = ""
     por_certificado: bool = False  # a credencial e o certificado A1 + a chave 2FA: nao tem senha
+    tribunal_id: str = ""          # identidade do tribunal (registro.py), independente do endereco
+    grau: str = ""                 # "1G", "2G" ou "" (da identidade)
 
     def valores(self) -> list:
         return [
             self.tribunal, self.url_login, self.advogado, self.cpf, self.email,
             self.senha if (self.senha_cadastrada or self.senha_incerta) else "", self.chave_2fa,
             "Sim" if self.senha_cadastrada else ("Incerto: conferir" if self.senha_incerta else "Nao"), "OK" if self.login_testado else "Falhou",
-            self.quando.strftime("%d/%m/%Y %H:%M"), self.observacao,
+            self.quando.strftime("%d/%m/%Y %H:%M"), self.observacao, self.tribunal_id, self.grau,
         ]
 
 
@@ -59,6 +63,8 @@ def _workbook_bytes(linhas: list[LinhaCredencial]) -> bytes:
     for row in ws.iter_rows(min_row=2):
         for cell in row:
             cell.number_format = "@"  # texto: CPF e senha nao viram numero/formula
+            if isinstance(cell.value, str):
+                cell.data_type = "s"  # texto que comeca com "=" nao vira formula no Excel
     for idx, titulo in enumerate(COLUNAS, start=1):
         largura = max([len(titulo)] + [len(str(ws.cell(r, idx).value or "")) for r in range(2, ws.max_row + 1)])
         ws.column_dimensions[get_column_letter(idx)].width = min(largura + 2, 60)

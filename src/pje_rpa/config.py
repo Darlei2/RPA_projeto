@@ -37,8 +37,80 @@ def _read_toml(path: Path, chain: tuple[Path, ...] = ()) -> dict:
     return base
 
 
+def _secao_tribunal(path: Path) -> dict:
+    """Secao [tribunal] do PROPRIO arquivo (identidade nao e herdada por `herda`)."""
+    with path.open("rb") as stream:
+        proprio = tomllib.load(stream).get("tribunal", {})
+    if not isinstance(proprio, dict):
+        raise ConfigurationError(f"{path.name}: [tribunal] deve ser uma secao")
+    return proprio
+
+
+def resolver_identidade(path: Path, app: dict):
+    """Identidade do tribunal do arquivo: registro da pasta (tribunais\\_registro.toml) e/ou secao
+    [tribunal] do proprio arquivo. NUNCA a partir do endereco. Devolve (Tribunal, origem, avisos).
+    Conflito ou tribunal desconhecido com registro presente: ConfigurationError explicito."""
+    from . import registro
+
+    path = Path(path)
+    if path.stem.startswith("_"):  # base comum (_comum.toml): nao e um tribunal
+        return registro.Tribunal(id="", nome=str(app.get("tribunal", "")), ramo=""), "base", []
+    try:
+        reg = registro.carregar(path.parent)
+    except registro.RegistroInvalido as exc:
+        raise ConfigurationError(str(exc)) from exc
+    proprio = _secao_tribunal(path)
+    tid = str(proprio.get("id", path.stem))
+    if tid != path.stem:
+        raise ConfigurationError(f"{path.name}: [tribunal] id = '{tid}' tem de ser igual ao nome do arquivo "
+                                 f"('{path.stem}'): o id e permanente e e por ele que pedidos e credenciais "
+                                 "reconhecem o tribunal")
+    nome_app = str(app.get("tribunal", "")).strip()
+    entrada = reg.get(tid) if reg else None
+    avisos: list[str] = []
+    if entrada and proprio:
+        for campo, valor in proprio.items():
+            atual = getattr(entrada, campo, None)
+            if campo == "hosts_autorizados":
+                atual, valor = list(atual or ()), [str(h).lower() for h in (valor or [])]
+            if campo != "id" and valor != atual:
+                raise ConfigurationError(
+                    f"{path.name}: [tribunal] {campo} = {valor!r} diverge do registro ({atual!r}). "
+                    f"A identidade fica em {registro.ARQUIVO}: corrija um dos dois.")
+        origem = "registro"
+    elif entrada:
+        origem = "registro"
+    elif proprio:
+        dados = {"nome": nome_app, **proprio, "id": tid}
+        try:
+            entrada = registro.tribunal_de_dict(dados, path.name)
+        except registro.RegistroInvalido as exc:
+            raise ConfigurationError(str(exc)) from exc
+        origem = "arquivo"
+    elif reg is not None:
+        raise ConfigurationError(
+            f"{path.name}: o tribunal '{tid}' nao esta no registro ({registro.ARQUIVO}). Acrescente-o ao "
+            "registro (id, nome, ramo, grau, grupo_credencial, hosts_autorizados) ou declare a identidade "
+            "numa secao [tribunal] do proprio arquivo.")
+    else:
+        entrada = registro.Tribunal(id=tid, nome=nome_app or "NAO_CONFIGURADO", ramo="")
+        origem = "sem-registro"
+    grau_app = str(app.get("grau", "")).strip().upper()
+    if grau_app and origem != "base" and grau_app != entrada.grau:
+        raise ConfigurationError(f"{path.name}: app.grau = '{grau_app}' diverge da identidade do tribunal "
+                                 f"('{entrada.grau or 'instancia unica'}'). O grau fica no registro: tire app.grau.")
+    if str(app.get("domain", "")).strip():
+        avisos.append(f"{path.name}: app.domain e ignorado: o dominio de integracao e ligado ao id do tribunal "
+                      "fora do .toml")
+    if origem != "sem-registro" and nome_app and nome_app != entrada.nome:
+        avisos.append(f"{path.name}: app.tribunal = '{nome_app}' difere do nome do registro "
+                      f"('{entrada.nome}'); vale o do registro")
+    return entrada, origem, avisos
+
+
 def load_config(path: Path) -> AppConfig:
     raw = _read_toml(path)
+    raw.pop("tribunal", None)  # a identidade vem de resolver_identidade (sem heranca)
 
     app = raw.get("app", {})
     browser = raw.get("browser", {})
@@ -72,10 +144,15 @@ def load_config(path: Path) -> AppConfig:
     missing = sorted(required - selectors.keys())
     if missing:
         raise ConfigurationError(f"Seletores obrigatorios ausentes: {', '.join(missing)}")
+    tribunal, origem, avisos = resolver_identidade(Path(path), app)
+    aprovado = app.get("endereco_aprovado", "")
+    if not isinstance(aprovado, str):
+        raise ConfigurationError("app.endereco_aprovado deve ser texto")
 
     return AppConfig(
         environment=str(app.get("environment", "simulation")),
-        tribunal=str(app.get("tribunal", "NAO_CONFIGURADO")),
+        tribunal=(tribunal.nome if origem in ("registro", "arquivo")
+                  else str(app.get("tribunal", "NAO_CONFIGURADO"))),
         base_url=base_url,
         selectors_approved=bool(app.get("selectors_approved", False)),
         allow_live_submission=bool(app.get("allow_live_submission", False)),
@@ -90,6 +167,15 @@ def load_config(path: Path) -> AppConfig:
         signer=_signer_config(raw.get("signer", {})),
         # chave antiga dos .toml: aceita, mas sem efeito (a referencia deixou de ser exigida)
         require_authorization_ref=bool(app.get("require_authorization_ref", False)),
+        tribunal_id=tribunal.id,
+        grau=tribunal.grau,
+        grupo_credencial=tribunal.grupo_credencial,
+        ramo=tribunal.ramo,
+        identidade_origem=origem,
+        hosts_autorizados=tuple(tribunal.hosts_autorizados),
+        endereco_padrao=tribunal.endereco_padrao,
+        endereco_aprovado=aprovado.strip(),
+        avisos=tuple(avisos),
     )
 
 
@@ -173,7 +259,7 @@ def assert_live_ready(config: AppConfig, record: LawyerRecord | None = None) -> 
         raise ConfigurationError("Seletores ainda nao foram homologados")
     if not config.allow_live_submission:
         raise ConfigurationError("Envio real permanece bloqueado por configuracao")
-    _assert_official_target(config, record)
+    _assert_official_target(config, record, envio_real=True)
 
 
 def assert_rehearsal_ready(config: AppConfig, record: LawyerRecord | None = None) -> None:
@@ -184,9 +270,16 @@ def assert_rehearsal_ready(config: AppConfig, record: LawyerRecord | None = None
     _assert_official_target(config, record)
 
 
-def _assert_official_target(config: AppConfig, record: LawyerRecord | None) -> None:
+def _assert_official_target(config: AppConfig, record: LawyerRecord | None, envio_real: bool = False) -> None:
+    """Validacao dos enderecos (enderecos.py), independente da identidade do tribunal."""
+    from . import enderecos
+
     if "exemplo" in config.base_url.lower() or "example" in config.base_url.lower():
         raise ConfigurationError("Substitua a URL de exemplo pela URL oficial do tribunal")
+    erros = enderecos.problemas(config)
+    if erros:
+        raise ConfigurationError(f"Endereco de login de {config.tribunal_id or config.tribunal} recusado: "
+                                 + "; ".join(erros))
     # autorizacao_ref e opcional: os contratos/autorizacoes ficam na base do operador. Quando
     # preenchida, continua registrada na auditoria de cada execucao.
     if record and ("TESTE" in record.nome_esperado.upper() or record.email.endswith("@example.com")):
@@ -194,6 +287,8 @@ def _assert_official_target(config: AppConfig, record: LawyerRecord | None) -> N
     hostname = (urlparse(config.base_url).hostname or "").lower()
     if not hostname.endswith(".jus.br"):
         raise ConfigurationError("Modo live aceita somente dominio oficial terminado em .jus.br")
+    if envio_real and not enderecos.aprovado_para_envio_real(config):
+        raise ConfigurationError(enderecos.pendencia_do_envio_real(config))
 
 
 def _string_lists(value: object, label: str) -> dict[str, list[str]]:

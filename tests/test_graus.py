@@ -79,23 +79,21 @@ def _cfg(nome: str):
 
 
 # --------------------------------------------------------------------- regra
-def test_grupo_e_grau_pelo_endereco():
-    assert graus.grupo("https://pje.trt5.jus.br/primeirograu/login.seam") == "TRT5"
-    assert graus.grau("https://pje.trt5.jus.br/primeirograu/login.seam") == "1G"
-    assert graus.grupo("https://pje.trt15.jus.br/segundograu/login.seam") == "TRT15"
-    assert graus.grau("https://pje.trt15.jus.br/segundograu/login.seam") == "2G"
-    # fora da regra: cada grau e uma credencial propria
-    for url in ("https://pje1g.trf1.jus.br/pje/login.seam", "https://pje2g.trf1.jus.br/pje/login.seam",
-                "https://pje1g-mg.tse.jus.br/pje/login.seam", "https://pje.tjap.jus.br/1g/login.seam", ""):
-        assert graus.grupo(url) == "" and graus.grau(url) == ""
+def test_grupo_e_grau_pela_identidade():
+    assert (graus.grupo(_cfg("trt5")), graus.grau(_cfg("trt5"))) == ("TRT5", "1G")
+    assert (graus.grupo(_cfg("trt15-2g")), graus.grau(_cfg("trt15-2g"))) == ("TRT15", "2G")
+    # fora da regra: cada grau e uma credencial propria (o grau continua conhecido)
+    for chave, grau in (("trf1", "1G"), ("trf1-2g", "2G"), ("tremg", "1G"), ("tjap", "1G"), ("cnj", "")):
+        assert (graus.grupo(_cfg(chave)), graus.grau(_cfg(chave))) == ("", grau)
+    assert graus.grupo(None) == "" and graus.grau(None) == ""
 
 
 def test_todo_trt_tem_os_dois_graus_configurados(monkeypatch):
     monkeypatch.chdir(PROJECT)
     por_grupo: dict[str, set[str]] = {}
     for o in listar_tribunais():
-        if graus.grupo(o.url):
-            por_grupo.setdefault(graus.grupo(o.url), set()).add(graus.grau(o.url))
+        if graus.grupo(o):
+            por_grupo.setdefault(graus.grupo(o), set()).add(graus.grau(o))
     assert sorted(por_grupo, key=lambda g: int(g[3:])) == [f"TRT{n}" for n in range(1, 25)]
     assert all(g == {"1G", "2G"} for g in por_grupo.values())
     # o 2o grau herda os seletores do 1o e nasce sem envio real liberado
@@ -118,15 +116,18 @@ def test_pedir_um_grau_traz_o_outro_na_ordem_certa(monkeypatch):
 
 def test_grupo_sem_o_arquivo_do_outro_grau_fica_de_fora(tmp_path):
     so_um = OpcaoTribunal("trt5", tmp_path / "a.toml", "TRT5 - 1o grau", True,
-                          "https://pje.trt5.jus.br/primeirograu/login.seam")
-    outro = OpcaoTribunal("tjap", tmp_path / "b.toml", "TJAP - 1o grau", True, "https://pje.tjap.jus.br/1g/login.seam")
+                          "https://pje.trt5.jus.br/primeirograu/login.seam", "1G", "TRT5", "TRT")
+    outro = OpcaoTribunal("tjap", tmp_path / "b.toml", "TJAP - 1o grau", True, "https://pje.tjap.jus.br/1g/login.seam",
+                          "1G", "", "TJ")
     final, incluidos, incompletos = graus.completar([so_um, outro], [so_um, outro])
     assert final == [outro] and incluidos == [] and incompletos == ["TRT5"]
 
 
 def test_grupo_com_um_grau_so_liberado_sai_inteiro(tmp_path):
-    a = OpcaoTribunal("trt5", tmp_path / "a.toml", "TRT5 - 1o grau", True, "https://pje.trt5.jus.br/primeirograu/login.seam")
-    c = OpcaoTribunal("tjap", tmp_path / "c.toml", "TJAP - 1o grau", True, "https://pje.tjap.jus.br/1g/login.seam")
+    a = OpcaoTribunal("trt5", tmp_path / "a.toml", "TRT5 - 1o grau", True, "https://pje.trt5.jus.br/primeirograu/login.seam",
+                      "1G", "TRT5", "TRT")
+    c = OpcaoTribunal("tjap", tmp_path / "c.toml", "TJAP - 1o grau", True, "https://pje.tjap.jus.br/1g/login.seam",
+                      "1G", "", "TJ")
     assert graus.so_grupos_inteiros([a, c]) == ([c], ["TRT5"])
 
 
@@ -222,6 +223,7 @@ def test_senha_pelo_login_unico_tambem_e_repetida(tmp_path):
 def _tribunais_de_teste(tmp_path, liberados):
     trib = tmp_path / "tribunais"
     trib.mkdir()
+    shutil.copy(PROJECT / "tribunais" / "_registro.toml", trib / "_registro.toml")
     for nome in ("_comum.toml", "trt5.toml", "trt5-2g.toml", "tjap.toml"):
         texto = (PROJECT / "tribunais" / nome).read_text(encoding="utf-8")
         valor = "true" if nome[:-5] in liberados else "false"   # vale o do teste, nao o da maquina
@@ -233,7 +235,7 @@ def _tribunais_de_teste(tmp_path, liberados):
 def test_assistente_inclui_o_outro_grau_e_roda_os_dois(tmp_path, monkeypatch):
     trib = _tribunais_de_teste(tmp_path, {"trt5", "trt5-2g"})
     original = lote.listar_tribunais
-    monkeypatch.setattr(lote, "listar_tribunais", lambda pasta=trib: original(trib))
+    monkeypatch.setattr(lote, "listar_tribunais", lambda pasta=trib, erros=None: original(trib, erros))
     fake = Fake(respostas=[str(_planilha(tmp_path))])
     assert run_executar(tmp_path / "audit", tmp_path / "out", tribunal="trt5", ensaio=False, deps=fake.deps()) == 0
     texto = "\n".join(fake.log)
@@ -245,7 +247,7 @@ def test_assistente_inclui_o_outro_grau_e_roda_os_dois(tmp_path, monkeypatch):
 def test_real_com_um_grau_so_liberado_nao_faz_nenhum_dos_dois(tmp_path, monkeypatch):
     trib = _tribunais_de_teste(tmp_path, {"trt5", "tjap"})  # 2o grau do TRT5 ainda sem envio real
     original = lote.listar_tribunais
-    monkeypatch.setattr(lote, "listar_tribunais", lambda pasta=trib: original(trib))
+    monkeypatch.setattr(lote, "listar_tribunais", lambda pasta=trib, erros=None: original(trib, erros))
     fake = Fake(respostas=[str(_planilha(tmp_path))])
     run_executar(tmp_path / "audit", tmp_path / "out", tribunal="trt5, tjap", ensaio=False, deps=fake.deps())
     texto = "\n".join(fake.log)
@@ -388,13 +390,12 @@ def test_trt_exige_telefone_e_os_outros_nao():
     rg = {"rg_numero": "123456789", "rg_orgao": "SSP/BA"}
     sem, com = SimpleNamespace(telefone="", **rg), SimpleNamespace(telefone="71999998888", **rg)
     sem_rg = SimpleNamespace(telefone="71999998888", rg_numero="", rg_orgao="")
-    for url in ("https://pje.trt5.jus.br/primeirograu/login.seam", "https://pje.trt15.jus.br/segundograu/login.seam"):
-        assert exigencias.faltando(url, sem) == ["telefone (celular com DDD)"] and exigencias.faltando(url, com) == []
+    for trt in (_cfg("trt5"), _cfg("trt15-2g")):
+        assert exigencias.faltando(trt, sem) == ["telefone (celular com DDD)"] and exigencias.faltando(trt, com) == []
         # o formulario dos TRTs tambem exige o RG: sem ele a linha e pulada antes de qualquer acesso
-        assert exigencias.faltando(url, sem_rg) == ["numero do RG", "orgao emissor do RG"]
-    for url in ("https://pje1g-mg.tse.jus.br/pje/login.seam", "https://pje1g.trf1.jus.br/pje/login.seam",
-                "https://pje.tjap.jus.br/1g/login.seam", ""):
-        assert exigencias.faltando(url, sem) == [] and exigencias.faltando(url, sem_rg) == []
+        assert exigencias.faltando(trt, sem_rg) == ["numero do RG", "orgao emissor do RG"]
+    for outro in (_cfg("tremg"), _cfg("trf1"), _cfg("tjap"), None):
+        assert exigencias.faltando(outro, sem) == [] and exigencias.faltando(outro, sem_rg) == []
 
 
 def _sem_telefone(tmp_path):
@@ -434,7 +435,7 @@ def test_assistente_avisa_antes_de_comecar_que_falta_o_telefone(tmp_path, monkey
 
     trib = _tribunais_de_teste(tmp_path, {"trt5", "trt5-2g", "tjap"})
     original = lote.listar_tribunais
-    monkeypatch.setattr(lote, "listar_tribunais", lambda pasta=trib: original(trib))
+    monkeypatch.setattr(lote, "listar_tribunais", lambda pasta=trib, erros=None: original(trib, erros))
     planilha = _planilha(tmp_path)
     wb = load_workbook(planilha)
     wb.active.cell(row=2, column=CABECALHO.index("Celular") + 1, value="")
@@ -453,13 +454,13 @@ def test_pedido_define_quem_entra_em_cada_tribunal_e_recebe_os_resultados(tmp_pa
     os resultados para montar o relatorio."""
     trib = _tribunais_de_teste(tmp_path, {"trt5", "trt5-2g", "tjap"})
     original = lote.listar_tribunais
-    monkeypatch.setattr(lote, "listar_tribunais", lambda pasta=trib: original(trib))
+    monkeypatch.setattr(lote, "listar_tribunais", lambda pasta=trib, erros=None: original(trib, erros))
     planilha = _planilha(tmp_path, [("ADVOGADA DE TESTE", "52998224725"), ("SEGUNDO ADVOGADO", "01234567890")])
     fake = Fake(respostas=[str(planilha)])
     deps = fake.deps()
     # a primeira so no TRT5 (os dois graus); o segundo so no TJAP
     pedido = {("52998224725", "trt5"), ("01234567890", "tjap")}
-    deps.participa = lambda config, linha: (linha.record.cpf_esperado, config.base_url.split(".")[1]) in pedido
+    deps.participa = lambda config, linha: (linha.record.cpf_esperado, config.tribunal_id.split("-")[0]) in pedido
     recebido = {}
     deps.relatar = recebido.update
     assert run_executar(tmp_path / "audit", tmp_path / "out", tribunal="trt5, tjap", ensaio=False, deps=deps) == 0
@@ -486,7 +487,7 @@ def test_tribunal_sem_ninguem_do_pedido_nao_acessa_nada(tmp_path):
 def test_falha_no_relatorio_nao_esconde_o_resultado(tmp_path, monkeypatch):
     trib = _tribunais_de_teste(tmp_path, {"tjap"})
     original = lote.listar_tribunais
-    monkeypatch.setattr(lote, "listar_tribunais", lambda pasta=trib: original(trib))
+    monkeypatch.setattr(lote, "listar_tribunais", lambda pasta=trib, erros=None: original(trib, erros))
     fake = Fake(respostas=[str(_planilha(tmp_path))])
     deps = fake.deps()
     deps.relatar = lambda por_tribunal: 1 / 0
@@ -560,7 +561,7 @@ def test_credencial_por_certificado_primeiro_grau_sem_cadastro_nao_faz_o_segundo
 def test_credencial_por_certificado_nao_combina_com_so_senha(tmp_path, monkeypatch):
     trib = _tribunais_de_teste(tmp_path, {"tjap"})
     original = lote.listar_tribunais
-    monkeypatch.setattr(lote, "listar_tribunais", lambda pasta=trib: original(trib))
+    monkeypatch.setattr(lote, "listar_tribunais", lambda pasta=trib, erros=None: original(trib, erros))
     fake = Fake(respostas=[str(_planilha_com_chave(tmp_path))])
     deps, chamadas = _por_certificado(fake)
     deps.opcoes.so_senha = True

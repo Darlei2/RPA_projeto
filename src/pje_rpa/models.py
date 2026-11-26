@@ -91,6 +91,17 @@ class AppConfig:
     stop_markers: dict[str, list[str]]
     signer: "SignerConfig | None" = None
     require_authorization_ref: bool = False  # sem efeito (mantido para os .toml antigos)
+    # Identidade do tribunal (registro.py): independe do base_url, que so diz onde navegar.
+    tribunal_id: str = ""
+    grau: str = ""                     # "1G", "2G" ou "" (instancia unica)
+    grupo_credencial: str = ""         # ex.: "TRT5" nos dois graus do TRT5 (uma credencial so)
+    ramo: str = ""                     # TRT, TJ, TRF, TRE...
+    identidade_origem: str = ""        # "registro", "arquivo" (secao [tribunal]) ou "sem-registro"
+    # Seguranca dos enderecos (enderecos.py): separada da identidade.
+    hosts_autorizados: tuple[str, ...] = ()
+    endereco_padrao: str = ""          # referencia do registro (revisada no Git)
+    endereco_aprovado: str = ""        # aprovado pelo operador para o envio real (enderecos --aprovar)
+    avisos: tuple[str, ...] = ()       # divergencias nao fatais (ex.: nome diferente do registro)
 
 
 @dataclass

@@ -129,18 +129,18 @@ def test_tabela_alimenta_as_exigencias(tmp_path):
     mapeamento.registrar("trt5", trt5, "MAPEADO", "", {"origem": "cadastro", "campos": campos}, tabela, tmp_path / "s")
     sem = SimpleNamespace(telefone="", rg_numero="", rg_orgao="", rg_data_expedicao="", estado_civil="")
     com = SimpleNamespace(telefone="71999998888", rg_numero="1", rg_orgao="SSP/BA", rg_data_expedicao="", estado_civil="")
-    assert exigencias.faltando(tjmt.base_url, sem, tabela) == [
+    assert exigencias.faltando(tjmt, sem, tabela) == [
         "telefone (celular com DDD)", "numero do RG", "orgao emissor do RG"]
-    assert exigencias.faltando(tjmt.base_url, com, tabela) == []
-    assert exigencias.faltando(tjba.base_url, sem, tabela) == []
+    assert exigencias.faltando(tjmt, com, tabela) == []
+    assert exigencias.faltando(tjba, sem, tabela) == []
     # TRT: regra fixa + tabela, sem repetir
-    assert exigencias.faltando(trt5.base_url, sem, tabela) == [
+    assert exigencias.faltando(trt5, sem, tabela) == [
         "telefone (celular com DDD)", "numero do RG", "orgao emissor do RG"]
     # campo que veio preenchido pelo PJe nao e exigido da planilha
     preenchido = [dict(c, veio_preenchido="sim") if c["campo"] == "phone" else c for c in campos]
     mapeamento.registrar("tjmt", tjmt, "MAPEADO", "", {"origem": "cadastro", "campos": preenchido},
                          tabela, tmp_path / "s")
-    assert "telefone (celular com DDD)" not in exigencias.faltando(tjmt.base_url, sem, tabela)
+    assert "telefone (celular com DDD)" not in exigencias.faltando(tjmt, sem, tabela)
 
 
 # ------------------------------------------------------------------ fluxo

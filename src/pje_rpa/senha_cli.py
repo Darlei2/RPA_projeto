@@ -242,7 +242,7 @@ def _one_tribunal(config, audit_root: Path, lawyer: dict, inbox, secret_2fa: str
 
     print(f"\n== {config.tribunal} ==")
     linha = LinhaCredencial(config.tribunal, config.base_url, lawyer["nome"], lawyer["cpf"], lawyer["email"],
-                            chave_2fa=lawyer["chave_2fa_exibir"])
+                            chave_2fa=lawyer["chave_2fa_exibir"], tribunal_id=getattr(config, "tribunal_id", ""))
     audit = AuditLog(audit_root)
     audit.record("credential_wizard_started", "CREDENTIAL", {"tribunal": config.tribunal})
     browser = PlaywrightBrowser(config)
@@ -338,7 +338,7 @@ def testar_credencial(config, audit_root: Path, lawyer: dict, secret_2fa: str, s
 
     print(f"\n== {config.tribunal} ==")
     linha = LinhaCredencial(config.tribunal, config.base_url, lawyer["nome"], lawyer["cpf"], lawyer["email"],
-                            chave_2fa=lawyer["chave_2fa_exibir"])
+                            chave_2fa=lawyer["chave_2fa_exibir"], tribunal_id=getattr(config, "tribunal_id", ""))
     linha.senha, linha.senha_cadastrada = senha, True
     audit = AuditLog(audit_root)
     audit.record("credential_test_started", "CREDENTIAL", {"tribunal": config.tribunal, "origem": "login unico"})

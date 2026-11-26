@@ -323,7 +323,12 @@ def run_mapear(tribunal: str = "", planilha: str = "", linha: int = 0, pausa: fl
     deps = deps or _dependencias_padrao()
     log = deps.log
     tabela, arquivo_situacao = tabela or TABELA, arquivo_situacao or SITUACAO
-    opcoes = listar_tribunais()
+    from .lote import avisar_problemas
+
+    erros: list[str] = []
+    opcoes = listar_tribunais(erros=erros)
+    avisar_problemas(opcoes, erros, log)
+    opcoes = [o for o in opcoes if not o.problemas]
     escolhidos, invalidos = escolher(opcoes, tribunal) if tribunal else ([], [])
     while not escolhidos:
         if invalidos:
@@ -512,8 +517,19 @@ def run_mapear_tela(tribunal: str = "", planilha: str = "", linha: int = 0, tabe
         return 1
     codigo_saida = 0
     for i, opcao in enumerate(escolhidos, start=1):
-        config = replace(base, tribunal=opcao["nome"], base_url=opcao["url"])
+        host = (urlparse(opcao["url"]).hostname or "").lower()
+        config = replace(base, tribunal=opcao["nome"], base_url=opcao["url"], tribunal_id=opcao["tribunal"],
+                         identidade_origem="outros-sistemas", hosts_autorizados=(host,),
+                         endereco_padrao=opcao["url"])
         log(f"\n===== {i}/{len(escolhidos)} {opcao['nome']} ({opcao['url']}) =====")
+        from .enderecos import problemas as problemas_do_endereco
+
+        recusado = problemas_do_endereco(config)
+        if recusado:
+            log("Endereco recusado (" + "; ".join(recusado) + "): corrija tribunais\\outros-sistemas.csv.")
+            registrar(opcao["tribunal"], config, "PULADO", "endereco recusado", {}, tabela, arquivo_situacao)
+            codigo_saida = 3
+            continue
         nav = navegador(config) if navegador else NavegadorAssistido(config)
         try:
             nav.abrir(opcao["url"])

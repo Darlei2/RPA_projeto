@@ -39,9 +39,15 @@ def ramo(tribunal: str) -> str:
 
 def sondar(config: AppConfig) -> dict[str, Any]:
     from .browser import PlaywrightBrowser
+    from .enderecos import problemas
 
+    result: dict[str, Any] = {"tribunal": config.tribunal, "tribunal_id": config.tribunal_id,
+                              "base_url": config.base_url}
+    recusado = problemas(config)
+    if recusado:  # validacao do endereco antes de abrir o navegador
+        result.update(ok=False, erro="endereco de login recusado: " + "; ".join(recusado))
+        return result
     browser = PlaywrightBrowser(config)
-    result: dict[str, Any] = {"tribunal": config.tribunal, "base_url": config.base_url}
     try:
         browser.open(config.base_url)
         result["url_aberta"] = browser.page.url
